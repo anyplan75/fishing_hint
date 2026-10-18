@@ -139,6 +139,17 @@ struct SettingsView: View {
                             .foregroundStyle(FieldColor.muted)
                     }
                 }
+                FieldCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("조석예보 인증키")
+                            .font(.headline)
+                        SecureField("공공데이터포털 인증키", text: $store.dataGoKrKey)
+                            .textFieldStyle(.roundedBorder)
+                        Text("국립해양조사원 조석예보를 볼 때만 씁니다. 비워 두면 들물·날물은 바다 예보 모델만 보여 줍니다. 인코딩하지 않은 키를 넣으세요. 어장 경고는 키 없이도 앱 안의 공개 파일을 봅니다.")
+                            .font(.caption)
+                            .foregroundStyle(FieldColor.muted)
+                    }
+                }
                 HStack {
                     Button("암호 저장") { store.saveSecrets() }
                         .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))

@@ -7,31 +7,34 @@ import Security
 struct SecretPair {
     var mapbox: String
     var gemini: String
+    var dataGoKr: String
 }
 
 enum SecretVault {
     private static let service = "바로낚시"
 
     static func load() -> SecretPair {
-        let saved = SecretPair(mapbox: read("mapbox") ?? "", gemini: read("gemini") ?? "")
-        if !saved.mapbox.isEmpty || !saved.gemini.isEmpty {
+        let saved = SecretPair(mapbox: read("mapbox") ?? "", gemini: read("gemini") ?? "", dataGoKr: read("datagokr") ?? "")
+        if !saved.mapbox.isEmpty || !saved.gemini.isEmpty || !saved.dataGoKr.isEmpty {
             return saved
         }
         if let imported = readSecretsFile() {
             save(imported)
             return imported
         }
-        return SecretPair(mapbox: "", gemini: "")
+        return SecretPair(mapbox: "", gemini: "", dataGoKr: "")
     }
 
     static func save(_ pair: SecretPair) {
         write("mapbox", pair.mapbox)
         write("gemini", pair.gemini)
+        write("datagokr", pair.dataGoKr)
     }
 
     static func parse(_ text: String) -> SecretPair {
         var mapbox = ""
         var gemini = ""
+        var dataGoKr = ""
         for raw in text.split(whereSeparator: \.isNewline) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") { continue }
@@ -42,17 +45,18 @@ enum SecretVault {
             switch parts[0] {
             case "MAPBOX_ACCESS_TOKEN": mapbox = parts[1]
             case "GEMINI_API_KEY": gemini = parts[1]
+            case "DATA_GO_KR_SERVICE_KEY": dataGoKr = parts[1]
             default: break
             }
         }
-        return SecretPair(mapbox: mapbox, gemini: gemini)
+        return SecretPair(mapbox: mapbox, gemini: gemini, dataGoKr: dataGoKr)
     }
 
     private static func readSecretsFile() -> SecretPair? {
         for path in candidatePaths() {
             guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
             let pair = parse(text)
-            if !pair.mapbox.isEmpty || !pair.gemini.isEmpty { return pair }
+            if !pair.mapbox.isEmpty || !pair.gemini.isEmpty || !pair.dataGoKr.isEmpty { return pair }
         }
         return nil
     }
