@@ -507,9 +507,9 @@ final class AppStore: ObservableObject {
             let loaded = await self.loadRecommendContext(scope: scope, requireUser: requireUser, from: from, to: to)
             guard generation == self.recommendGen else { return }
             switch loaded {
-            case .failure(let message):
+            case .failure(let error):
                 self.recommendBusy = false
-                self.writeRecommendMessage(message, slot: slot)
+                self.writeRecommendMessage(error.message, slot: slot)
             case .success(let context):
                 await work(context, generation)
             }
@@ -524,21 +524,26 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// 추천 자료를 못 가져왔을 때의 안내 문장. Result의 실패 값은 Error여야 해서 문자열을 그대로 쓰지 않습니다.
+    private struct RecommendMessageError: Error {
+        let message: String
+    }
+
     private func loadRecommendContext(
         scope: RecommendScope,
         requireUser: Bool,
         from: Date,
         to: Date
-    ) async -> Result<RecommendContext, String> {
+    ) async -> Result<RecommendContext, RecommendMessageError> {
         guard let center = recommendCenter(scope: scope, requireUser: requireUser) else {
             if requireUser || scope == .here {
-                return .failure("현재 위치가 없습니다. 위치 권한을 허용해 주세요. 다른 지역으로 대신 찾지 않습니다.")
+                return .failure(RecommendMessageError(message: "현재 위치가 없습니다. 위치 권한을 허용해 주세요. 다른 지역으로 대신 찾지 않습니다."))
             }
-            return .failure("저장된 지역이 없습니다. 지도에서 지역을 맞춘 뒤 이 지역 저장을 누르세요.")
+            return .failure(RecommendMessageError(message: "저장된 지역이 없습니다. 지도에서 지역을 맞춘 뒤 이 지역 저장을 누르세요."))
         }
         let found = await candidatePoints(latitude: center.lat, longitude: center.lon, radiusKm: center.radius)
         guard let pack = try? await cachedConditions(latitude: center.lat, longitude: center.lon) else {
-            return .failure("날씨와 바다 정보를 가져오지 못했습니다. 인터넷을 확인한 뒤 다시 누르세요.")
+            return .failure(RecommendMessageError(message: "날씨와 바다 정보를 가져오지 못했습니다. 인터넷을 확인한 뒤 다시 누르세요."))
         }
         var prepared: [RecommendEngine.PreparedPoint] = []
         for point in found {
