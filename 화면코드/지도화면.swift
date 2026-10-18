@@ -1,0 +1,232 @@
+import SwiftUI
+
+// 지도와 점수 순 목록입니다. 내 주변, 저장한 지역, 찍은 자리를 여기서 고릅니다.
+
+struct MapScreen: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var query = ""
+
+    var body: some View {
+        GeometryReader { geo in
+            if geo.size.width > 860 {
+                HStack(spacing: 0) {
+                    mapStack.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    list.frame(width: 380)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    mapStack.frame(height: max(280, geo.size.height * 0.46))
+                    list
+                }
+            }
+        }
+        .background(FieldColor.ink)
+    }
+
+    private var mapStack: some View {
+        ZStack(alignment: .topLeading) {
+            if store.mapboxToken.isEmpty {
+                missingToken
+            } else {
+                MapboxMapView(
+                    token: store.mapboxToken,
+                    latitude: store.centerLat,
+                    longitude: store.centerLon,
+                    userLat: store.userLat,
+                    userLon: store.userLon,
+                    radiusKm: store.radiusKm,
+                    flyToken: store.flyToken,
+                    pins: pins,
+                    onTap: { lat, lon in store.analyzeTap(latitude: lat, longitude: lon) },
+                    onSelect: { store.select($0) },
+                    onMove: { lat, lon in store.rememberMap(latitude: lat, longitude: lon) }
+                )
+            }
+            controls
+        }
+    }
+
+    private var pins: [MapPin] {
+        store.ranked.map { briefing in
+            MapPin(
+                id: briefing.point.id,
+                name: briefing.point.name,
+                latitude: briefing.point.latitude,
+                longitude: briefing.point.longitude,
+                score: briefing.score,
+                selected: briefing.point.id == store.selectedPointId
+            )
+        }
+    }
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                TextField("지역, 방파제, 포구 검색", text: $query)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .background(FieldColor.ink.opacity(0.88))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .onSubmit { store.searchPlaces(query) }
+                Button("찾기") { store.searchPlaces(query) }
+                    .buttonStyle(FieldButton(fill: FieldColor.sea))
+            }
+            if !store.searchHits.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(store.searchHits) { hit in
+                        Button(hit.name) { store.go(to: hit); query = hit.name }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .foregroundStyle(FieldColor.paper)
+                    }
+                }
+                .background(FieldColor.ink.opacity(0.92))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            HStack {
+                Text(store.useMyLocation ? "내 주변" : store.regionTitle)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(store.locationText)
+                    .font(.caption)
+                    .foregroundStyle(FieldColor.muted)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(FieldColor.ink.opacity(0.88))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .foregroundStyle(FieldColor.paper)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("반경 \(Int(store.radiusKm))km")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(FieldColor.good)
+                Slider(value: $store.radiusKm, in: 3...30, step: 1, onEditingChanged: { editing in
+                    if !editing { store.refresh() }
+                })
+            }
+            .padding(10)
+            .background(FieldColor.ink.opacity(0.88))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            HStack {
+                Button("내 위치") { store.focusOnMe() }
+                    .buttonStyle(FieldButton(fill: FieldColor.card2))
+                Button("저장 지역") { store.useSavedRegion() }
+                    .buttonStyle(FieldButton(fill: FieldColor.card2))
+                Button("이 지역 저장") { store.saveCurrentRegion() }
+                    .buttonStyle(FieldButton(fill: FieldColor.card2))
+            }
+            Button(store.busy ? "계산 중" : "이 지역 분석") { store.refresh() }
+                .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
+                .disabled(store.busy)
+        }
+        .padding(12)
+        .frame(maxWidth: 420)
+    }
+
+    private var list: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(store.regionTitle)
+                    .font(.headline)
+                Spacer()
+                if store.busy { ProgressView().controlSize(.small) }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            Text(store.statusText)
+                .font(.caption)
+                .foregroundStyle(FieldColor.muted)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(store.ranked) { briefing in
+                        Button { store.select(briefing.point.id) } label: {
+                            PointRankCard(briefing: briefing)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .background(FieldColor.ink)
+        .foregroundStyle(FieldColor.paper)
+    }
+
+    private var missingToken: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("지도 암호가 없습니다")
+                .font(.title3.weight(.bold))
+            Text("설정에서 맵박스 공개 토큰을 넣으면 이 자리에 지도가 켜집니다. 토큰 없이도 지역을 저장한 뒤 목록 분석은 할 수 있지만, 지도를 누르는 기능은 토큰이 있어야 합니다.")
+                .font(.subheadline)
+                .foregroundStyle(FieldColor.muted)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(FieldColor.card)
+    }
+}
+
+struct PointRankCard: View {
+    var briefing: PointBriefing
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(briefing.call.title)
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.call(briefing.call).opacity(0.18))
+                    .foregroundStyle(Color.call(briefing.call))
+                    .clipShape(Capsule())
+                Spacer()
+                Text("\(briefing.score)")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.call(briefing.call))
+            }
+            Text(briefing.point.name)
+                .font(.headline)
+                .foregroundStyle(FieldColor.paper)
+            Text(briefing.headline)
+                .font(.subheadline)
+                .foregroundStyle(FieldColor.paper)
+            HStack {
+                Text(briefing.point.place.title)
+                if let distance = briefing.distanceKm {
+                    Text(FieldFormat.distance(distance))
+                }
+                if briefing.point.isMine { Text("내 포인트") }
+            }
+            .font(.caption)
+            .foregroundStyle(FieldColor.muted)
+            Text(briefing.nowLine)
+                .font(.caption)
+                .foregroundStyle(FieldColor.muted)
+                .lineLimit(2)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FieldColor.card)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(FieldColor.line, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+struct FieldButton: ButtonStyle {
+    var fill: Color
+    var ink: Color = FieldColor.paper
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption.weight(.bold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(fill.opacity(configuration.isPressed ? 0.7 : 1))
+            .foregroundStyle(ink)
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+}

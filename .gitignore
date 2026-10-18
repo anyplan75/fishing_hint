@@ -1,0 +1,8 @@
+.DS_Store
+build/
+DerivedData/
+.derivedData/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+비밀암호/비밀암호.txt
