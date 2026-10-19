@@ -65,8 +65,11 @@ struct MyPointsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("내 포인트")
                     .font(.largeTitle.weight(.bold))
-                Text("내가 찍어서 저장한 자리입니다. 반경 밖이어도 분석 목록에 같이 들어갑니다.")
+                Text("내가 저장한 자리입니다. 자리마다 받은 예보로 낚시 시간과 주간·야간 해루질 시간을 보여 줍니다. 알림은 해루질 시간에만 옵니다.")
                     .foregroundStyle(FieldColor.muted)
+                Text(store.savedTimesNote)
+                    .font(.subheadline)
+                    .foregroundStyle(FieldColor.wait)
                 if store.myPoints.isEmpty {
                     Text("아직 없습니다. 지도에서 자리를 연 뒤 '내 포인트로 저장'을 누르세요.")
                         .padding(.top, 12)
@@ -87,6 +90,15 @@ struct MyPointsView: View {
                                     .font(.caption)
                                     .foregroundStyle(FieldColor.muted)
                             }
+                            if let times = store.savedTimes[point.id] {
+                                timeBlock("낚시하기 좋은 때", lines: times.fishingLines, color: FieldColor.good)
+                                timeBlock("주간 해루질", lines: times.dayLines, color: FieldColor.wait)
+                                timeBlock("야간 해루질", lines: times.nightLines, color: FieldColor.glean)
+                            } else {
+                                Text("이 자리의 시간을 계산하는 중입니다.")
+                                    .font(.caption)
+                                    .foregroundStyle(FieldColor.muted)
+                            }
                             HStack {
                                 Button("분석") { store.select(point.id) }
                                     .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
@@ -101,6 +113,19 @@ struct MyPointsView: View {
         }
         .background(FieldColor.ink)
         .foregroundStyle(FieldColor.paper)
+    }
+
+    private func timeBlock(_ title: String, lines: [String], color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(color)
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.subheadline)
+            }
+        }
+        .padding(.top, 4)
     }
 }
 

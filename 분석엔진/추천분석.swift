@@ -45,6 +45,14 @@ enum RecommendEngine {
         var message: String
     }
 
+    struct SavedVisit {
+        var fishing: [SpotPick]
+        var dayShore: SpotPick?
+        var daySkin: SpotPick?
+        var nightShore: SpotPick?
+        var nightSkin: SpotPick?
+    }
+
     static func window(on day: Date, startHour: Int, endHour: Int) -> Window {
         let calendar = Calendar.current
         let startDay = calendar.startOfDay(for: day)
@@ -64,12 +72,16 @@ enum RecommendEngine {
         preferred: [String],
         tide: TideReport,
         areaTitle: String,
-        kind: RecommendKind
+        kind: RecommendKind,
+        lookedAround: Bool = true
     ) -> FishingOutcome {
-        let scopeNote = scopeSentence(areaTitle: areaTitle, count: points.count, fewerThan: limit)
+        let scopeNote = scopeSentence(areaTitle: areaTitle, count: points.count, fewerThan: limit, lookedAround: lookedAround)
         guard !points.isEmpty else {
+            if !lookedAround {
+                return FishingOutcome(picks: [], message: "주변 공개 자리를 가져오지 못했습니다. \(areaTitle) 안의 저장 자리와 찍은 자리가 없습니다. 없는 자리는 만들지 않았습니다.")
+            }
             if kind == .now {
-                return FishingOutcome(picks: [], message: "\(areaTitle) 안에서 공개 자리, 저장 포인트, 찍은 자리가 없습니다.")
+                return FishingOutcome(picks: [], message: "\(areaTitle) 주변을 검색했지만 공개 자리, 저장 포인트, 찍은 자리가 없습니다.")
             }
             return FishingOutcome(picks: [], message: scopeNote + " 이 반경에서 모은 자리가 없습니다.")
         }
@@ -119,11 +131,15 @@ enum RecommendEngine {
         to: Date,
         night: Bool,
         tide: TideReport,
-        areaTitle: String
+        areaTitle: String,
+        lookedAround: Bool = true
     ) -> GleanOutcome {
         let coastal = points.filter { coastalPlace($0) }
-        let scopeNote = scopeSentence(areaTitle: areaTitle, count: points.count, fewerThan: nil)
+        let scopeNote = scopeSentence(areaTitle: areaTitle, count: points.count, fewerThan: nil, lookedAround: lookedAround)
         guard !points.isEmpty else {
+            if !lookedAround {
+                return GleanOutcome(shore: [], skin: [], message: "주변 공개 자리를 가져오지 못했습니다. \(areaTitle) 안의 저장 자리와 찍은 자리가 없습니다. 없는 자리는 만들지 않았습니다.")
+            }
             return GleanOutcome(shore: [], skin: [], message: scopeNote + " 이 반경에서 모은 자리가 없습니다.")
         }
         guard overlaps(points, from: from, to: to) else {
@@ -433,8 +449,58 @@ enum RecommendEngine {
         return lines
     }
 
-    private static func scopeSentence(areaTitle: String, count: Int, fewerThan: Int?) -> String {
-        var text = "\(areaTitle)만 봤습니다. 후보는 주변 공개 자리, 저장 포인트, 지도에서 찍은 자리입니다. 전국은 찾지 않았습니다. 모은 후보는 \(count)곳입니다."
+    /// 저장한 자리 하나의 낚시 시간과 주·야 해루질 시간입니다. 예보에 있는 시간만 고릅니다.
+    static func savedVisit(point: FishingPoint, pack: ConditionPack, tide: TideReport, preferred: [String]) -> SavedVisit {
+        let start = Date()
+        let end = (pack.hours.map(\.time).max() ?? start).addingTimeInterval(3600)
+        let prepared = PreparedPoint(point: point, pack: pack, distanceKm: 0, distanceFromUser: false)
+        let moon = MoonClock.info(on: start, longitude: point.longitude)
+        let hours = FishingAnalyst.hourJudgements(
+            point: point,
+            conditions: pack,
+            moon: moon,
+            preferred: preferred,
+            speciesAllow: nil,
+            from: start,
+            to: end
+        )
+        let safe = hours.filter { !$0.dangerous && $0.score >= fitFloor && $0.time > start }
+        let calendar = Calendar.current
+        var fishing: [SpotPick] = []
+        let byDay = Dictionary(grouping: safe, by: { calendar.startOfDay(for: $0.time) })
+        for day in byDay.keys.sorted() {
+            guard let best = byDay[day]?.max(by: { $0.score < $1.score }) else { continue }
+            let atTime = MoonClock.info(on: best.time, longitude: point.longitude)
+            fishing.append(makePick(
+                item: prepared,
+                best: best,
+                moon: atTime,
+                tide: tide,
+                kind: .plan,
+                night: nil,
+                lowNote: nil
+            ))
+        }
+        let day = gleaning(points: [prepared], from: start, to: end, night: false, tide: tide, areaTitle: point.name)
+        let night = gleaning(points: [prepared], from: start, to: end, night: true, tide: tide, areaTitle: point.name)
+        return SavedVisit(
+            fishing: fishing,
+            dayShore: bestPick(day.shore),
+            daySkin: bestPick(day.skin),
+            nightShore: bestPick(night.shore),
+            nightSkin: bestPick(night.skin)
+        )
+    }
+
+    private static func bestPick(_ picks: [SpotPick]) -> SpotPick? {
+        picks.max { $0.successRate < $1.successRate }
+    }
+
+    private static func scopeSentence(areaTitle: String, count: Int, fewerThan: Int?, lookedAround: Bool) -> String {
+        if !lookedAround {
+            return "\(areaTitle)입니다. 주변 공개 자리는 가져오지 못했습니다. 저장한 자리와 찍은 자리만 봤고, 모은 후보는 \(count)곳입니다. 없는 자리는 만들지 않았습니다."
+        }
+        var text = "\(areaTitle) 주변을 검색했습니다. 후보는 그 안의 공개 자리, 저장 포인트, 지도에서 찍은 자리입니다. 전국은 찾지 않았습니다. 모은 후보는 \(count)곳입니다."
         if let limit = fewerThan, count < limit {
             text += " \(limit)곳보다 적어서 있는 만큼만 보여 줍니다."
         }

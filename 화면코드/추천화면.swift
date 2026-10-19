@@ -17,12 +17,11 @@ struct RecommendScreen: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("추천")
                     .font(.largeTitle.weight(.bold))
-                Picker("추천 종류", selection: $mode) {
-                    Text("낚시 계획").tag(0)
-                    Text("바로가자").tag(1)
-                    Text("해루질").tag(2)
+                HStack(spacing: 8) {
+                    modeChip("낚시계획", tag: 0, fill: FieldColor.good)
+                    modeChip("바로가자", tag: 1, fill: FieldColor.wait)
+                    modeChip("해루질", tag: 2, fill: FieldColor.glean)
                 }
-                .pickerStyle(.segmented)
 
                 switch mode {
                 case 1: nowPage
@@ -45,6 +44,23 @@ struct RecommendScreen: View {
                     .environmentObject(store)
             }
         }
+    }
+
+    private func modeChip(_ title: String, tag: Int, fill: Color) -> some View {
+        let on = mode == tag
+        return Button {
+            mode = tag
+        } label: {
+            Text(title)
+                .font(.title3.weight(.bold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(on ? fill : FieldColor.card)
+                .foregroundStyle(on ? FieldColor.ink : fill)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(fill, lineWidth: 3))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
     }
 
     private var planPage: some View {

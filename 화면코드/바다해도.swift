@@ -20,6 +20,8 @@ struct ChartScreen: View {
     @EnvironmentObject private var store: AppStore
     @State private var kind: ChartPlaceKind = .here
     @State private var facts: [ChartFact] = []
+    @State private var mapScript: String?
+    @State private var rejection: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -39,17 +41,28 @@ struct ChartScreen: View {
             }
             if store.dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 missingKey
+            } else if let rejection {
+                FieldCard {
+                    Text(rejection)
+                        .font(.subheadline)
+                }
             } else if let place = chosenPlace() {
                 Text("\(place.title) 주변입니다. 수심·위험은 공개 응답에 글이 있을 때만 적습니다.")
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
-                HaereumMapView(
-                    apiKey: store.dataGoKrKey,
-                    latitude: place.latitude,
-                    longitude: place.longitude
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                if let mapScript {
+                    HaereumMapView(
+                        script: mapScript,
+                        latitude: place.latitude,
+                        longitude: place.longitude
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                } else if !facts.isEmpty {
+                    Text("배경 지도를 불러오지 못했습니다.")
+                        .font(.subheadline)
+                        .foregroundStyle(FieldColor.muted)
+                }
                 factList
             } else {
                 missingPlace
@@ -138,32 +151,41 @@ struct ChartScreen: View {
         let key = store.dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty, let place = chosenPlace() else {
             facts = []
+            mapScript = nil
+            rejection = nil
             return
         }
         facts = []
+        mapScript = nil
+        rejection = nil
         do {
-            facts = try await HaereumClient.facts(latitude: place.latitude, longitude: place.longitude, apiKey: key)
+            let page = try await HaereumClient.load(latitude: place.latitude, longitude: place.longitude, apiKey: key)
+            rejection = page.rejection
+            mapScript = page.script
+            facts = page.facts
         } catch is CancellationError {
             return
         } catch {
-            facts = [ChartFact(id: "fail", title: "바다해도", lines: ["자료를 가져오지 못했습니다. 없는 내용은 적지 않습니다."])]
+            rejection = "해도를 불러오지 못했습니다."
+            mapScript = nil
+            facts = []
         }
     }
 }
 
 private struct HaereumMapView: View {
-    var apiKey: String
+    var script: String
     var latitude: Double
     var longitude: Double
 
     var body: some View {
-        HaereumWebView(apiKey: apiKey, latitude: latitude, longitude: longitude)
+        HaereumWebView(script: script, latitude: latitude, longitude: longitude)
     }
 }
 
 #if os(iOS)
 private struct HaereumWebView: UIViewRepresentable {
-    var apiKey: String
+    var script: String
     var latitude: Double
     var longitude: Double
 
@@ -178,12 +200,12 @@ private struct HaereumWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.load(webView, apiKey: apiKey, latitude: latitude, longitude: longitude)
+        context.coordinator.load(webView, script: script, latitude: latitude, longitude: longitude)
     }
 }
 #else
 private struct HaereumWebView: NSViewRepresentable {
-    var apiKey: String
+    var script: String
     var latitude: Double
     var longitude: Double
 
@@ -196,7 +218,7 @@ private struct HaereumWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        context.coordinator.load(webView, apiKey: apiKey, latitude: latitude, longitude: longitude)
+        context.coordinator.load(webView, script: script, latitude: latitude, longitude: longitude)
     }
 }
 #endif
@@ -204,22 +226,18 @@ private struct HaereumWebView: NSViewRepresentable {
 private final class HaereumCoordinator {
     private var signature = ""
 
-    func load(_ webView: WKWebView, apiKey: String, latitude: Double, longitude: Double) {
-        let next = String(format: "%.4f,%.4f,%d", latitude, longitude, apiKey.hashValue)
+    func load(_ webView: WKWebView, script: String, latitude: Double, longitude: Double) {
+        let next = String(format: "%.4f,%.4f,%d", latitude, longitude, script.hashValue)
         guard next != signature else { return }
         signature = next
-        guard let html = HaereumPage.html(apiKey: apiKey, latitude: latitude, longitude: longitude) else { return }
+        let html = HaereumPage.html(script: script, latitude: latitude, longitude: longitude)
         webView.loadHTMLString(html, baseURL: URL(string: "https://www.khoa.go.kr"))
     }
 }
 
 private enum HaereumPage {
-    static func html(apiKey: String, latitude: Double, longitude: Double) -> String? {
-        guard let script = HaereumClient.basemapScript(apiKey: apiKey) else { return nil }
-        let source = script
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "<", with: "&lt;")
+    static func html(script: String, latitude: Double, longitude: Double) -> String {
+        let source = script.replacingOccurrences(of: "</", with: "<\\/")
         return """
         <!DOCTYPE html>
         <html>
@@ -234,7 +252,9 @@ private enum HaereumPage {
         <script src="https://www.khoa.go.kr/oceanmap/js/proj4js-1.1.0/lib/proj4js.js"></script>
         <script src="https://www.khoa.go.kr/oceanmap/js/proj4js-1.1.0/lib/defs/EPSG5179.js"></script>
         <script src="https://www.khoa.go.kr/oceanmap/js/gis/OtmsApi.js"></script>
-        <script src="\(source)"></script>
+        <script>
+        \(source)
+        </script>
         </head>
         <body>
         <div id="map"></div>

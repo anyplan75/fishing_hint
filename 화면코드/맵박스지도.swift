@@ -265,7 +265,7 @@ private enum MapPage {
       }
       return coords;
     }
-    function color(score){ if (score >= 75) return '#d6f25c'; if (score >= 60) return '#8fd3ff'; return '#ff6b4a'; }
+    function color(score){ if (score < 0) return '#f4f7ef'; if (score >= 75) return '#d6f25c'; if (score >= 60) return '#8fd3ff'; return '#ff6b4a'; }
     function ensure(token, lon, lat, zoom) {
       if (map || !token) return;
       mapboxgl.accessToken = token;

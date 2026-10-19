@@ -83,11 +83,14 @@ final class AppStore: ObservableObject {
     @Published var mapLink = LinkLine.absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
     @Published var aiLink = LinkLine.absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
     @Published var tideLink = LinkLine.absent("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
+    @Published var savedTimes: [String: SavedSpotTimes] = [:]
+    @Published var savedTimesNote = "저장한 자리의 낚시 시간과 해루질 시간을 받은 예보로 계산합니다."
 
     private let locator = LocationFixer()
     private var cache: [String: ConditionPack] = [:]
     private var refreshGen = 0
     private var recommendGen = 0
+    private var savedPlanGen = 0
     private var didFirstFix = false
 
     var ranked: [PointBriefing] {
@@ -124,6 +127,7 @@ final class AppStore: ObservableObject {
             refresh()
         }
         resetLinksForKeys()
+        refreshSavedPlans()
     }
 
     func applyFix(_ coordinate: CLLocationCoordinate2D) {
@@ -199,7 +203,7 @@ final class AppStore: ObservableObject {
             guard gen == self.refreshGen else { return }
             busy = false
             if ranked.isEmpty {
-                statusText = "공개된 자리가 없습니다. 지도를 누르면 그 자리를 바로 분석합니다."
+                statusText = "이 반경의 공개 자리가 없습니다. 지도를 누르면 자리만 남고, 분석을 누르면 계산합니다."
             } else {
                 statusText = "\(ranked.count)곳을 조건 점수로 줄 세웠습니다."
             }
@@ -207,10 +211,11 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func analyzeTap(latitude: Double, longitude: Double) {
+    /// 지도를 누르면 저장하지 않은 자리 하나만 남깁니다. 물때와 날씨는 분석을 누를 때 계산합니다.
+    func dropSpot(latitude: Double, longitude: Double) {
         let point = FishingPoint(
             id: String(format: "tap-%.4f-%.4f", latitude, longitude),
-            name: "지금 찍은 자리",
+            name: "찍은 자리",
             latitude: latitude,
             longitude: longitude,
             place: .custom,
@@ -221,28 +226,22 @@ final class AppStore: ObservableObject {
             measuredTempC: nil,
             memo: ""
         )
+        clearUnsavedTap()
         tapped = point
-        selectedPointId = point.id
-        statusText = "찍은 자리의 물때와 수온을 계산하는 중"
-        Task {
-            do {
-                let pack = try await cachedConditions(latitude: latitude, longitude: longitude)
-                let moon = MoonClock.info(on: Date(), longitude: longitude)
-                var briefing = FishingAnalyst.brief(
-                    point: point,
-                    conditions: pack,
-                    moon: moon,
-                    preferred: preferSpecies,
-                    distanceKm: distance(from: point)
-                )
-                briefings[point.id] = briefing
-                if let text = await rewriteBrief(briefing.script) {
-                    briefing.aiScript = text
-                    briefings[point.id] = briefing
-                }
-            } catch {
-                statusText = "이 자리의 날씨를 가져오지 못했습니다."
-            }
+        statusText = "자리를 찍었습니다. 분석을 누르면 이 자리를 계산합니다."
+    }
+
+    private func clearUnsavedTap() {
+        let stale = briefings.filter { id, briefing in
+            briefing.point.source == "찍은자리" && !myPoints.contains(where: { $0.id == id })
+        }
+        for id in stale.keys {
+            briefings.removeValue(forKey: id)
+            if selectedPointId == id { selectedPointId = nil }
+        }
+        if let old = tapped, old.source == "찍은자리", !myPoints.contains(where: { $0.id == old.id }) {
+            briefings.removeValue(forKey: old.id)
+            if selectedPointId == old.id { selectedPointId = nil }
         }
     }
 
@@ -313,6 +312,9 @@ final class AppStore: ObservableObject {
     }
 
     func select(_ id: String) {
+        if tapped?.id == id, tapped?.source == "찍은자리", briefings[id] == nil {
+            return
+        }
         selectedPointId = id
         if briefings[id] != nil {
             Task { await polish(id: id, generation: refreshGen) }
@@ -356,6 +358,7 @@ final class AppStore: ObservableObject {
         selectedPointId = copy.id
         if tapped?.id == point.id { tapped = copy }
         saveDisk()
+        refreshSavedPlans()
     }
 
     func updateMine(_ point: FishingPoint) {
@@ -377,13 +380,19 @@ final class AppStore: ObservableObject {
             }
             briefings[point.id] = briefing
         }
+        refreshSavedPlans()
     }
 
     func deleteMine(_ point: FishingPoint) {
         myPoints.removeAll { $0.id == point.id }
         briefings.removeValue(forKey: point.id)
         if selectedPointId == point.id { selectedPointId = nil }
+        if tapped?.id == point.id { tapped = nil }
+        savedTimes.removeValue(forKey: point.id)
         saveDisk()
+        let removedId = point.id
+        Task { await GleanAlarm.cancel(pointId: removedId) }
+        refreshSavedPlans()
     }
 
     func keepRadius() {
@@ -398,6 +407,83 @@ final class AppStore: ObservableObject {
         }
         saveDisk()
         refresh()
+        refreshSavedPlans()
+    }
+
+    /// 저장한 자리만 봅니다. 찍기만 한 자리는 낚시 시간 추천과 해루질 알림에 넣지 않습니다.
+    func refreshSavedPlans() {
+        savedPlanGen += 1
+        let generation = savedPlanGen
+        let points = myPoints.filter(\.isMine)
+        if points.isEmpty {
+            savedTimes = [:]
+            savedTimesNote = "저장한 자리가 없습니다. 저장하지 않은 자리는 시간 추천과 알림 대상이 아닙니다."
+            Task {
+                guard generation == self.savedPlanGen else { return }
+                _ = await GleanAlarm.replace(items: [])
+            }
+            return
+        }
+        savedTimesNote = "등록한 자리의 물때와 날씨를 보는 중"
+        let species = preferSpecies
+        let apiKey = dataGoKrKey
+        Task {
+            var next: [String: SavedSpotTimes] = [:]
+            var alarms: [(point: FishingPoint, day: [Date], night: [Date])] = []
+            let from = Date()
+            let to = from.addingTimeInterval(48 * 3600)
+            for point in points {
+                if generation != self.savedPlanGen { return }
+                guard let pack = try? await self.cachedConditions(latitude: point.latitude, longitude: point.longitude) else {
+                    next[point.id] = SavedSpotTimes(
+                        pointId: point.id,
+                        fishingLines: ["날씨와 바다 정보를 가져오지 못했습니다. 시간을 만들지 않았습니다."],
+                        dayLines: ["날씨와 바다 정보를 가져오지 못했습니다."],
+                        nightLines: ["날씨와 바다 정보를 가져오지 못했습니다."]
+                    )
+                    continue
+                }
+                let tide = await PublicTideClient.forecast(
+                    latitude: point.latitude,
+                    longitude: point.longitude,
+                    from: from,
+                    to: to,
+                    apiKey: apiKey
+                )
+                if generation != self.savedPlanGen { return }
+                let visit = RecommendEngine.savedVisit(point: point, pack: pack, tide: tide, preferred: species)
+                let fishingLines = visit.fishing.isEmpty
+                    ? ["받은 예보 안에서 낚시하기 좋은 시간이 없습니다."]
+                    : visit.fishing.map {
+                        "\(FieldFormat.dayClock($0.when)) · \($0.species). 받은 물때·날씨로 고른 시간입니다. 알림은 보내지 않습니다."
+                    }
+                let dayPicks = [visit.dayShore, visit.daySkin].compactMap { $0 }
+                let nightPicks = [visit.nightShore, visit.nightSkin].compactMap { $0 }
+                let dayLines = dayPicks.isEmpty
+                    ? ["받은 예보 안에서 주간 해루질에 맞는 시간이 없습니다."]
+                    : dayPicks.map { self.gleanLine($0) }
+                let nightLines = nightPicks.isEmpty
+                    ? ["받은 예보 안에서 야간 해루질에 맞는 시간이 없습니다."]
+                    : nightPicks.map { self.gleanLine($0) }
+                next[point.id] = SavedSpotTimes(
+                    pointId: point.id,
+                    fishingLines: fishingLines,
+                    dayLines: dayLines,
+                    nightLines: nightLines
+                )
+                alarms.append((point: point, day: dayPicks.map(\.when), night: nightPicks.map(\.when)))
+            }
+            guard generation == self.savedPlanGen else { return }
+            self.savedTimes = next
+            let note = await GleanAlarm.replace(items: alarms)
+            guard generation == self.savedPlanGen else { return }
+            self.savedTimesNote = note
+        }
+    }
+
+    private func gleanLine(_ pick: SpotPick) -> String {
+        let place = pick.kind == .skin ? "수중" : "갯가"
+        return "\(FieldFormat.dayClock(pick.when)) · \(place) · \(pick.species). 받은 물때·날씨로 고른 시간입니다."
     }
 
     func pick(id: String) -> SpotPick? {
@@ -418,7 +504,8 @@ final class AppStore: ObservableObject {
                 preferred: self.preferSpecies,
                 tide: context.tide,
                 areaTitle: context.title,
-                kind: .plan
+                kind: .plan,
+                lookedAround: context.lookedAround
             )
             guard generation == self.recommendGen else { return }
             self.planPicks = outcome.picks
@@ -440,7 +527,8 @@ final class AppStore: ObservableObject {
                 preferred: self.preferSpecies,
                 tide: context.tide,
                 areaTitle: context.title,
-                kind: .now
+                kind: .now,
+                lookedAround: context.lookedAround
             )
             guard generation == self.recommendGen else { return }
             self.nowPicks = outcome.picks
@@ -461,7 +549,8 @@ final class AppStore: ObservableObject {
                 to: context.to,
                 night: night,
                 tide: context.tide,
-                areaTitle: context.title
+                areaTitle: context.title,
+                lookedAround: context.lookedAround
             )
             guard generation == self.recommendGen else { return }
             self.shorePicks = outcome.shore
@@ -478,6 +567,7 @@ final class AppStore: ObservableObject {
         var title: String
         var from: Date
         var to: Date
+        var lookedAround: Bool
     }
 
     private enum RecommendMessageSlot {
@@ -539,7 +629,8 @@ final class AppStore: ObservableObject {
             }
             return .failure(RecommendMessageError(message: "저장된 지역이 없습니다. 지도에서 지역을 맞춘 뒤 이 지역 저장을 누르세요."))
         }
-        let found = await candidatePoints(latitude: center.lat, longitude: center.lon, radiusKm: center.radius)
+        let pool = await candidatePoints(latitude: center.lat, longitude: center.lon, radiusKm: center.radius)
+        let found = pool.points
         guard let pack = try? await cachedConditions(latitude: center.lat, longitude: center.lon) else {
             return .failure(RecommendMessageError(message: "날씨와 바다 정보를 가져오지 못했습니다. 인터넷을 확인한 뒤 다시 누르세요."))
         }
@@ -568,7 +659,7 @@ final class AppStore: ObservableObject {
             apiKey: dataGoKrKey
         )
         noteTideReport(tide)
-        return .success(RecommendContext(points: prepared, tide: tide, title: center.title, from: from, to: to))
+        return .success(RecommendContext(points: prepared, tide: tide, title: center.title, from: from, to: to, lookedAround: pool.lookedAround))
     }
 
     private func recommendCenter(scope: RecommendScope, requireUser: Bool) -> (lat: Double, lon: Double, radius: Double, title: String)? {
@@ -586,17 +677,26 @@ final class AppStore: ObservableObject {
         return (userLat, userLon)
     }
 
-    private func candidatePoints(latitude: Double, longitude: Double, radiusKm: Double) async -> [FishingPoint] {
-        let found = (try? await NearbyFinder.search(latitude: latitude, longitude: longitude, radiusKm: radiusKm)) ?? []
+    /// 내 위치나 고른 구역 주변을 검색합니다. 실패하면 그 반경의 저장 자리와 찍은 자리만 남기고, 검색한 척하지 않습니다.
+    private func candidatePoints(latitude: Double, longitude: Double, radiusKm: Double) async -> (points: [FishingPoint], lookedAround: Bool) {
+        let found: [FishingPoint]
+        let lookedAround: Bool
+        do {
+            found = try await NearbyFinder.search(latitude: latitude, longitude: longitude, radiusKm: radiusKm)
+            lookedAround = true
+        } catch is CancellationError {
+            return ([], false)
+        } catch {
+            found = []
+            lookedAround = false
+        }
         var points: [FishingPoint] = []
-        for point in found { appendCandidate(point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
-        for point in nearby { appendCandidate(point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
+        if lookedAround {
+            for point in found { appendCandidate(point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
+        }
         for point in myPoints { appendCandidate(point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
         if let tapped { appendCandidate(tapped, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
-        for briefing in briefings.values {
-            appendCandidate(briefing.point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm)
-        }
-        return points
+        return (points, lookedAround)
     }
 
     private func appendCandidate(

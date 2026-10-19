@@ -4,6 +4,11 @@ import Foundation
 // 사람이 숨겨 둔 비밀 포인트는 여기 없고, 내가 찍은 자리로 따로 저장합니다.
 
 enum NearbyFinder {
+    private static let endpoints = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+
     static func search(latitude: Double, longitude: Double, radiusKm: Double) async throws -> [FishingPoint] {
         let meters = Int(min(radiusKm, 30) * 1000)
         let query = """
@@ -20,14 +25,31 @@ enum NearbyFinder {
         );
         out center 40;
         """
-        var request = URLRequest(url: URL(string: "https://overpass-api.de/api/interpreter")!)
+        var lastError: Error = URLError(.badServerResponse)
+        for endpoint in endpoints {
+            guard let url = URL(string: endpoint) else { continue }
+            do {
+                return try await once(url: url, query: query, latitude: latitude, longitude: longitude)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    /// 질의 본문을 직접 만듭니다. 주소 없는 URLComponents 는 본문이 비어 주변 검색이 조용히 실패할 수 있습니다.
+    private static func once(url: URL, query: String, latitude: Double, longitude: Double) async throws -> [FishingPoint] {
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 30
         request.setValue("바로낚시/0.1", forHTTPHeaderField: "User-Agent")
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        var form = URLComponents()
-        form.queryItems = [URLQueryItem(name: "data", value: query)]
-        request.httpBody = form.percentEncodedQuery?.data(using: .utf8)
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
+        request.httpBody = Data("data=\(encoded)".utf8)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)

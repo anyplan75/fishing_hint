@@ -9,6 +9,17 @@ struct ChartFact: Identifiable {
     var lines: [String]
 }
 
+/// 바다해도 한 번 부르기의 결과입니다. 거절이면 연결됨으로 보지 않고 짧은 이유만 남깁니다.
+struct ChartLoad {
+    var script: String?
+    var rejection: String?
+    var facts: [ChartFact]
+}
+
+struct ChartKeyRejection: Error {
+    var line: String
+}
+
 enum HaereumClient {
     /// 개방海 안내 5장에 적힌 배경 지도 스크립트입니다. 오픈레이어스가 이 주소를 읽어 해도 그림을 만듭니다.
     static let basemapScriptRoot = "https://www.khoa.go.kr/oceanmap/BASEMAP/otmsBasemapApi.do"
@@ -37,17 +48,52 @@ enum HaereumClient {
         "sgg_nm": "시군구",
     ]
 
+    /// 비밀 파일에 퍼센트 인코딩으로 들어 있는 키는 한 번만 풀어, 주소에 두 번 인코딩되지 않게 합니다.
+    static func normalizedKey(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        for _ in 0..<2 {
+            guard text.contains("%"),
+                  let decoded = text.removingPercentEncoding,
+                  decoded != text,
+                  !decoded.isEmpty else { break }
+            text = decoded
+        }
+        return text
+    }
+
     static func basemapScript(apiKey: String) -> String? {
-        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = normalizedKey(apiKey)
         guard !key.isEmpty else { return nil }
         var parts = URLComponents(string: basemapScriptRoot)
         parts?.queryItems = [URLQueryItem(name: "ServiceKey", value: key)]
         return parts?.string
     }
 
+    /// 글 자료와 배경 지도 스크립트를 같이 준비합니다. 키 거절이면 지도도 사실도 연결됨처럼 보이지 않습니다.
+    static func load(latitude: Double, longitude: Double, apiKey: String) async throws -> ChartLoad {
+        let key = normalizedKey(apiKey)
+        guard !key.isEmpty else { return ChartLoad(script: nil, rejection: nil, facts: []) }
+        let found: [ChartFact]
+        do {
+            found = try await facts(latitude: latitude, longitude: longitude, apiKey: key)
+        } catch let error as ChartKeyRejection {
+            return ChartLoad(script: nil, rejection: error.line, facts: [])
+        }
+        do {
+            let script = try await basemapBody(apiKey: key)
+            return ChartLoad(script: script, rejection: nil, facts: found)
+        } catch let error as ChartKeyRejection {
+            return ChartLoad(script: nil, rejection: error.line, facts: [])
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return ChartLoad(script: nil, rejection: nil, facts: found)
+        }
+    }
+
     /// 고른 지점 동서남북 약 2km 안에서, 공개 자료가 글로 준 항목만 모읍니다.
     static func facts(latitude: Double, longitude: Double, apiKey: String) async throws -> [ChartFact] {
-        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = normalizedKey(apiKey)
         guard !key.isEmpty else { return [] }
         let south = latitude - 0.02
         let north = latitude + 0.02
@@ -100,11 +146,80 @@ enum HaereumClient {
             if data.count > 1_500_000 {
                 return ChartFact(id: code, title: title, lines: ["응답이 너무 커서 이 지점의 글만 골라 내지 못했습니다. 없는 내용은 적지 않습니다."])
             }
-            return read(data: data, code: code, title: title)
+            return try read(data: data, code: code, title: title)
+        } catch let error as ChartKeyRejection {
+            throw error
         } catch {
             if error is CancellationError { throw error }
             return ChartFact(id: code, title: title, lines: ["자료를 가져오지 못했습니다. 없는 내용은 적지 않습니다."])
         }
+    }
+
+    /// 배경 지도 스크립트를 받아, 타일 주소의 키가 다시 깨지지 않게 한 번만 인코딩해 넣습니다.
+    private static func basemapBody(apiKey: String) async throws -> String {
+        let key = normalizedKey(apiKey)
+        guard !key.isEmpty else { throw ChartKeyRejection(line: "해도 거절. 인증키가 비어 있습니다.") }
+        var parts = URLComponents(string: basemapScriptRoot)
+        parts?.queryItems = [URLQueryItem(name: "ServiceKey", value: key)]
+        guard let url = parts?.url else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let text = String(data: data, encoding: .utf8) ?? ""
+        if let line = rejectionLine(text) {
+            throw ChartKeyRejection(line: line)
+        }
+        guard status < 400, text.contains("OtmsLayer") else { throw URLError(.badServerResponse) }
+        return rewriteEmbeddedKey(text, key: key)
+    }
+
+    /// 국립해양조사원이 키를 거절한 문장만 짧은 한국어로 바꿉니다. 키 값은 넣지 않습니다.
+    private static func rejectionLine(_ raw: String) -> String? {
+        let result: String
+        if let data = raw.data(using: .utf8),
+           let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let value = object["result"] as? String {
+            result = value
+        } else if raw.contains("OtmsLayer") {
+            return nil
+        } else if raw.count < 400 {
+            result = raw
+        } else {
+            return nil
+        }
+        let text = result.lowercased()
+        if text.contains("invalid servicekey") || text.contains("invalid service key") {
+            return "해도 거절. 이 인증키를 받지 않았습니다."
+        }
+        if text.contains("servicekey is null") || text.contains("service key is null") {
+            return "해도 거절. 인증키가 비어 있습니다."
+        }
+        if text.contains("expired") || result.contains("만료") || result.contains("기한") {
+            return "해도 거절. 인증키 기한이 지났습니다."
+        }
+        if text.contains("exceed") || result.contains("초과") || (result.contains("호출") && result.contains("제한")) {
+            return "해도 거절. 오늘 호출 횟수를 넘겼습니다."
+        }
+        if text.contains("unauthor") || text.contains("authent") || text.contains("unregistered") || result.contains("권한") || result.contains("미등록") {
+            return "해도 거절. 이 자료 권한이 없습니다."
+        }
+        if text.contains("servicekey") || text.contains("service key") || result.contains("서비스키") || result.contains("인증키") {
+            return "해도 거절. 인증키를 확인하지 못했습니다."
+        }
+        return nil
+    }
+
+    /// 서버가 키를 풀어 스크립트에 다시 넣을 때 + 가 공백이 되지 않도록, 퍼센트로 한 번만 적습니다.
+    private static func rewriteEmbeddedKey(_ script: String, key: String) -> String {
+        let encoded = queryEscape(key)
+        guard let regex = try? NSRegularExpression(pattern: "ServiceKey=[^&'\"\\s<>]*") else { return script }
+        let range = NSRange(script.startIndex..., in: script)
+        return regex.stringByReplacingMatches(in: script, range: range, withTemplate: "ServiceKey=\(encoded)")
+    }
+
+    private static func queryEscape(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     /// 공개 문서의 도^분^초 형식입니다.
@@ -126,9 +241,12 @@ enum HaereumClient {
         return "\(sign)\(degree)^\(minute)^\(second)"
     }
 
-    private static func read(data: Data, code: String, title: String) -> ChartFact {
+    private static func read(data: Data, code: String, title: String) throws -> ChartFact {
         if let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
            let result = object["result"] as? String {
+            if let line = rejectionLine(result) {
+                throw ChartKeyRejection(line: line)
+            }
             let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
             let line = trimmed.isEmpty ? "응답에 글 항목이 없습니다." : "공개 자료 응답: \(trimmed)"
             return ChartFact(id: code, title: title, lines: [line])

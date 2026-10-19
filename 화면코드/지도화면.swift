@@ -46,7 +46,7 @@ struct MapScreen: View {
                     radiusKm: store.radiusKm,
                     flyToken: store.flyToken,
                     pins: pins,
-                    onTap: { lat, lon in store.analyzeTap(latitude: lat, longitude: lon) },
+                    onTap: { lat, lon in store.dropSpot(latitude: lat, longitude: lon) },
                     onSelect: { store.select($0) },
                     onMove: { lat, lon in store.rememberMap(latitude: lat, longitude: lon) },
                     onMap: { store.noteMap(ok: $0) }
@@ -56,7 +56,7 @@ struct MapScreen: View {
     }
 
     private var pins: [MapPin] {
-        store.ranked.map { briefing in
+        var items = store.ranked.map { briefing in
             MapPin(
                 id: briefing.point.id,
                 name: briefing.point.name,
@@ -66,6 +66,17 @@ struct MapScreen: View {
                 selected: briefing.point.id == store.selectedPointId
             )
         }
+        if let tapped = store.tapped, tapped.source == "찍은자리", !items.contains(where: { $0.id == tapped.id }) {
+            items.append(MapPin(
+                id: tapped.id,
+                name: tapped.name,
+                latitude: tapped.latitude,
+                longitude: tapped.longitude,
+                score: -1,
+                selected: false
+            ))
+        }
+        return items
     }
 
     private var controls: some View {
