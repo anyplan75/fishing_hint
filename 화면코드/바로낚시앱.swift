@@ -5,24 +5,41 @@ import SwiftUI
 struct AppShell: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var phoneTab = 0
 
     var body: some View {
         Group {
             if sizeClass == .compact {
-                TabView {
+                TabView(selection: $phoneTab) {
                     MapScreen()
                         .tabItem { Label("지도", systemImage: "map") }
+                        .tag(0)
+                    ChartScreen()
+                        .tabItem { Label("바다해도", systemImage: "water.waves") }
+                        .tag(1)
+                    RecommendFishingHost()
+                        .tabItem { Label("추천", systemImage: "star.circle") }
+                        .tag(2)
                     TackleLibraryView()
                         .tabItem { Label("채비", systemImage: "wrench.and.screwdriver") }
+                        .tag(3)
                     MyPointsView()
                         .tabItem { Label("내 포인트", systemImage: "mappin") }
+                        .tag(4)
                     SettingsView()
                         .tabItem { Label("설정", systemImage: "gearshape") }
+                        .tag(5)
+                }
+                .onChange(of: phoneTab) { _, newValue in
+                    if newValue == 2 { PublicFishingBoard.shared.refreshIfNeeded() }
                 }
             } else {
                 NavigationSplitView {
                     List {
                         NavigationLink { MapScreen() } label: { Label("지도", systemImage: "map") }
+                        NavigationLink { ChartScreen() } label: { Label("바다해도", systemImage: "water.waves") }
+                        NavigationLink { RecommendFishingHost() } label: { Label("추천", systemImage: "star.circle") }
                         NavigationLink { TackleLibraryView() } label: { Label("채비도감", systemImage: "wrench.and.screwdriver") }
                         NavigationLink { MyPointsView() } label: { Label("내 포인트", systemImage: "mappin") }
                         NavigationLink { SettingsView() } label: { Label("설정", systemImage: "gearshape") }
@@ -44,6 +61,9 @@ struct AppShell: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { PublicFishingBoard.shared.refreshIfNeeded() }
+        }
     }
 }
 
@@ -55,7 +75,10 @@ struct BaroNaksiApp: App {
         WindowGroup {
             AppShell()
                 .environmentObject(store)
-                .onAppear { store.start() }
+                .onAppear {
+                    store.start()
+                    PublicFishingBoard.shared.refreshIfNeeded()
+                }
         }
         .defaultSize(width: 1200, height: 820)
         .commands {

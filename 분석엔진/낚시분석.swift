@@ -4,6 +4,14 @@ import Foundation
 // 가장 높은 고기와 시간대를 고른 뒤, 그 조건에 맞는 채비를 붙입니다.
 // 위험하면 점수가 높아도 나가지 말라고 바꿉니다.
 
+struct HourJudgement {
+    var time: Date
+    var score: Int
+    var species: String
+    var reasons: [String]
+    var dangerous: Bool
+}
+
 private struct SpeciesRule {
     var name: String
     var water: WaterKind
@@ -527,6 +535,64 @@ enum FishingAnalyst {
         return lines
     }
 
+    /// 고른 시간 안의 한 시간마다, 조건표에서 가장 잘 맞는 생물을 고릅니다.
+    /// 바람·파도·천둥으로 빠지는 시간은 dangerous 로 표시하고 점수는 0입니다.
+    static func hourJudgements(
+        point: FishingPoint,
+        conditions: ConditionPack,
+        moon: MoonInfo,
+        preferred: [String],
+        speciesAllow: [String]?,
+        from: Date,
+        to: Date
+    ) -> [HourJudgement] {
+        var rules = filteredRules(point: point, conditions: conditions, preferred: preferred)
+        if let speciesAllow {
+            let allow = Set(speciesAllow)
+            rules = rules.filter { allow.contains($0.name) }
+        }
+        guard !rules.isEmpty else { return [] }
+        let stained = recentRain(conditions, now: from) >= 4
+        var rows: [HourJudgement] = []
+        for hour in conditions.hours where hour.time >= from && hour.time < to {
+            var bestScore = -1
+            var bestRule = rules[0]
+            var bestReasons: [String] = []
+            for rule in rules {
+                let danger = isDanger(hour, sea: conditions.usedSea && rule.water == .sea)
+                if danger { continue }
+                let result = scoreHour(rule: rule, hour: hour, pack: conditions, moon: moon, point: point, stained: stained)
+                if result.0 > bestScore {
+                    bestScore = result.0
+                    bestRule = rule
+                    bestReasons = result.1
+                }
+            }
+            if bestScore < 0 {
+                rows.append(HourJudgement(
+                    time: hour.time,
+                    score: 0,
+                    species: rules[0].name,
+                    reasons: ["이 시간은 바람·파도·천둥 때문에 제외"],
+                    dangerous: true
+                ))
+            } else {
+                rows.append(HourJudgement(
+                    time: hour.time,
+                    score: bestScore,
+                    species: bestRule.name,
+                    reasons: bestReasons,
+                    dangerous: false
+                ))
+            }
+        }
+        return rows
+    }
+
+    static func isNightHour(_ date: Date, pack: ConditionPack) -> Bool {
+        isNight(date, pack: pack)
+    }
+
     private static let catalog: [SpeciesRule] = [
         SpeciesRule(name: "감성돔", water: .sea, places: [.rock, .pier, .harbor], months: [1, 2, 3, 4, 9, 10, 11, 12], tempMin: 9, tempMax: 20, bestMin: 12, bestMax: 17, flood: true, ebb: true, slack: false, prefersNight: false, prefersDawn: true, dayOk: true, maxWind: 9, maxWave: 1.3),
         SpeciesRule(name: "벵에돔", water: .sea, places: [.rock], months: [5, 6, 7, 8, 9, 10, 11], tempMin: 16, tempMax: 26, bestMin: 18, bestMax: 23, flood: true, ebb: false, slack: false, prefersNight: false, prefersDawn: true, dayOk: true, maxWind: 7, maxWave: 1.1),
@@ -587,5 +653,32 @@ enum FieldFormat {
         guard let kilometers else { return "" }
         if kilometers < 1 { return String(format: "%.0fm", kilometers * 1000) }
         return String(format: "%.1fkm", kilometers)
+    }
+
+    static func sky(_ code: Int?) -> String {
+        guard let code else { return "모름" }
+        switch code {
+        case 0: return "맑음"
+        case 1: return "대체로 맑음"
+        case 2: return "조금 흐림"
+        case 3: return "흐림"
+        case 45, 48: return "안개"
+        case 51, 53, 55, 56, 57: return "이슬비"
+        case 61, 63, 65, 66, 67: return "비"
+        case 71, 73, 75, 77: return "눈"
+        case 80, 81, 82: return "소나기"
+        case 85, 86: return "눈 소나기"
+        case 95, 96, 99: return "천둥"
+        default: return "날씨 코드 \(code)"
+        }
+    }
+
+    static func money(_ won: Int?) -> String {
+        guard let won else { return "비용 모름" }
+        if won <= 0 { return "약 1천 원 미만" }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        let text = formatter.string(from: NSNumber(value: won)) ?? "\(won)"
+        return "약 \(text)원"
     }
 }

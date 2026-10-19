@@ -35,6 +35,18 @@ final class LocationFixer: NSObject, CLLocationManagerDelegate {
     }
 }
 
+struct LinkLine: Equatable {
+    var connected: Bool
+    var reason: String
+    var word: String { connected ? "연결됨" : "없음" }
+
+    static func absent(_ reason: String) -> LinkLine {
+        LinkLine(connected: false, reason: reason)
+    }
+
+    static let connected = LinkLine(connected: true, reason: "")
+}
+
 @MainActor
 final class AppStore: ObservableObject {
     @Published var mapboxToken = ""
@@ -58,10 +70,24 @@ final class AppStore: ObservableObject {
     @Published var flyToken = 0
     @Published var searchHits: [PlaceNameClient.Hit] = []
     @Published var regionTitle = "선택한 지역"
+    @Published var dataGoKrKey = ""
+    @Published var planPicks: [SpotPick] = []
+    @Published var nowPicks: [SpotPick] = []
+    @Published var shorePicks: [SpotPick] = []
+    @Published var skinPicks: [SpotPick] = []
+    @Published var planMessage = "날짜와 갈 수 있는 시간만 고르면, 그 안에서 좋은 시간을 찾아 최대 10곳을 줄 세웁니다."
+    @Published var nowMessage = "지금 위치에서 6시간 안의 좋은 시간을 찾아 최대 3곳을 줄 세웁니다."
+    @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 주간과 야간을 고른 뒤 갯가와 수중을 나눠 보여 줍니다."
+    @Published var recommendBusy = false
+    @Published var selectedPickId: String?
+    @Published var mapLink = LinkLine.absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
+    @Published var aiLink = LinkLine.absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
+    @Published var tideLink = LinkLine.absent("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
 
     private let locator = LocationFixer()
     private var cache: [String: ConditionPack] = [:]
     private var refreshGen = 0
+    private var recommendGen = 0
     private var didFirstFix = false
 
     var ranked: [PointBriefing] {
@@ -76,8 +102,9 @@ final class AppStore: ObservableObject {
     func start() {
         loadDisk()
         let secrets = SecretVault.load()
-        if mapboxToken.isEmpty { mapboxToken = secrets.mapbox }
-        if geminiKey.isEmpty { geminiKey = secrets.gemini }
+        mapboxToken = secrets.mapbox
+        geminiKey = secrets.gemini
+        dataGoKrKey = secrets.dataGoKr
         locator.onFix = { [weak self] coordinate in
             self?.applyFix(coordinate)
         }
@@ -96,6 +123,7 @@ final class AppStore: ObservableObject {
             flyToken += 1
             refresh()
         }
+        resetLinksForKeys()
     }
 
     func applyFix(_ coordinate: CLLocationCoordinate2D) {
@@ -122,7 +150,7 @@ final class AppStore: ObservableObject {
     func applyStatus(_ status: CLAuthorizationStatus) {
         switch status {
         case .authorizedAlways, .authorizedWhenInUse:
-            locationText = "현재 위치를 사용 중"
+            locationText = userLat == nil ? "현재 위치를 가져오는 중" : "현재 위치를 사용 중"
         case .denied, .restricted:
             locationText = "위치 권한이 꺼져 있습니다"
             statusText = "지도를 옮긴 뒤 '이 지역 분석'을 누르세요."
@@ -148,6 +176,7 @@ final class AppStore: ObservableObject {
             async let foundCall = NearbyFinder.search(latitude: lat, longitude: lon, radiusKm: radius)
             async let packCall = cachedConditions(latitude: lat, longitude: lon)
             async let nameCall = PlaceNameClient.reverse(latitude: lat, longitude: lon, token: mapboxToken)
+            async let tideCall: Void = noteTide(latitude: lat, longitude: lon, generation: gen)
             var found: [FishingPoint] = []
             do {
                 found = try await foundCall
@@ -155,9 +184,11 @@ final class AppStore: ObservableObject {
                 found = []
             }
             let pack = try? await packCall
-            let title = await nameCall
+            let named = await nameCall
+            await tideCall
             guard gen == self.refreshGen else { return }
-            if let title, !title.isEmpty { regionTitle = title }
+            noteMapbox(named.reach)
+            if let title = named.name, !title.isEmpty { regionTitle = title }
             nearby = found
             guard let pack else {
                 busy = false
@@ -205,11 +236,9 @@ final class AppStore: ObservableObject {
                     distanceKm: distance(from: point)
                 )
                 briefings[point.id] = briefing
-                if !geminiKey.isEmpty {
-                    if let text = try? await BriefingClient.rewrite(script: briefing.script, apiKey: geminiKey) {
-                        briefing.aiScript = text
-                        briefings[point.id] = briefing
-                    }
+                if let text = await rewriteBrief(briefing.script) {
+                    briefing.aiScript = text
+                    briefings[point.id] = briefing
                 }
             } catch {
                 statusText = "이 자리의 날씨를 가져오지 못했습니다."
@@ -258,13 +287,17 @@ final class AppStore: ObservableObject {
     }
 
     func searchPlaces(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         Task {
-            searchHits = await PlaceNameClient.forward(
-                query: query,
+            let found = await PlaceNameClient.forward(
+                query: trimmed,
                 latitude: centerLat,
                 longitude: centerLon,
                 token: mapboxToken
             )
+            noteMapbox(found.reach)
+            searchHits = found.hits
         }
     }
 
@@ -300,7 +333,7 @@ final class AppStore: ObservableObject {
                 preferred: preferSpecies,
                 distanceKm: distance(from: point)
             )
-            if !geminiKey.isEmpty, let text = try? await BriefingClient.rewrite(script: briefing.script, apiKey: geminiKey) {
+            if let text = await rewriteBrief(briefing.script) {
                 briefing.aiScript = text
             }
             briefings[point.id] = briefing
@@ -339,7 +372,7 @@ final class AppStore: ObservableObject {
                 preferred: preferSpecies,
                 distanceKm: distance(from: point)
             )
-            if !geminiKey.isEmpty, let text = try? await BriefingClient.rewrite(script: briefing.script, apiKey: geminiKey) {
+            if let text = await rewriteBrief(briefing.script) {
                 briefing.aiScript = text
             }
             briefings[point.id] = briefing
@@ -353,24 +386,8 @@ final class AppStore: ObservableObject {
         saveDisk()
     }
 
-    func saveSecrets() {
-        SecretVault.save(SecretPair(mapbox: mapboxToken.trimmingCharacters(in: .whitespacesAndNewlines), gemini: geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)))
-        mapboxToken = mapboxToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        geminiKey = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        statusText = "암호를 이 기기의 열쇠고에 저장했습니다."
-    }
-
-    func importSecrets(from url: URL) {
-        let allowed = url.startAccessingSecurityScopedResource()
-        defer { if allowed { url.stopAccessingSecurityScopedResource() } }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            statusText = "비밀 파일을 읽지 못했습니다."
-            return
-        }
-        let pair = SecretVault.parse(text)
-        if !pair.mapbox.isEmpty { mapboxToken = pair.mapbox }
-        if !pair.gemini.isEmpty { geminiKey = pair.gemini }
-        saveSecrets()
+    func keepRadius() {
+        saveDisk()
     }
 
     func toggleSpecies(_ name: String) {
@@ -381,6 +398,252 @@ final class AppStore: ObservableObject {
         }
         saveDisk()
         refresh()
+    }
+
+    func pick(id: String) -> SpotPick? {
+        planPicks.first { $0.id == id }
+            ?? nowPicks.first { $0.id == id }
+            ?? shorePicks.first { $0.id == id }
+            ?? skinPicks.first { $0.id == id }
+    }
+
+    func recommendPlan(on day: Date, startHour: Int, endHour: Int, scope: RecommendScope) {
+        let span = RecommendEngine.window(on: day, startHour: startHour, endHour: endHour)
+        beginRecommend(scope: scope, requireUser: false, from: span.start, to: span.end, slot: .plan) { context, generation in
+            let outcome = RecommendEngine.fishing(
+                points: context.points,
+                from: context.from,
+                to: context.to,
+                limit: 10,
+                preferred: self.preferSpecies,
+                tide: context.tide,
+                areaTitle: context.title,
+                kind: .plan
+            )
+            guard generation == self.recommendGen else { return }
+            self.planPicks = outcome.picks
+            self.planMessage = outcome.message
+            self.recommendBusy = false
+            await self.polish(outcome.picks, generation: generation)
+        }
+    }
+
+    func recommendNow() {
+        let start = Date()
+        let end = start.addingTimeInterval(RecommendEngine.nowSpan)
+        beginRecommend(scope: .here, requireUser: true, from: start, to: end, slot: .now) { context, generation in
+            let outcome = RecommendEngine.fishing(
+                points: context.points,
+                from: context.from,
+                to: context.to,
+                limit: 3,
+                preferred: self.preferSpecies,
+                tide: context.tide,
+                areaTitle: context.title,
+                kind: .now
+            )
+            guard generation == self.recommendGen else { return }
+            self.nowPicks = outcome.picks
+            self.nowMessage = outcome.message
+            self.recommendBusy = false
+            await self.polish(outcome.picks, generation: generation)
+        }
+    }
+
+    func recommendGleaning(on day: Date, night: Bool, scope: RecommendScope) {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: day)
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        beginRecommend(scope: scope, requireUser: false, from: start, to: end, slot: .glean) { context, generation in
+            let outcome = RecommendEngine.gleaning(
+                points: context.points,
+                from: context.from,
+                to: context.to,
+                night: night,
+                tide: context.tide,
+                areaTitle: context.title
+            )
+            guard generation == self.recommendGen else { return }
+            self.shorePicks = outcome.shore
+            self.skinPicks = outcome.skin
+            self.gleanMessage = outcome.message
+            self.recommendBusy = false
+            await self.polish(outcome.shore + outcome.skin, generation: generation)
+        }
+    }
+
+    private struct RecommendContext {
+        var points: [RecommendEngine.PreparedPoint]
+        var tide: TideReport
+        var title: String
+        var from: Date
+        var to: Date
+    }
+
+    private enum RecommendMessageSlot {
+        case plan
+        case now
+        case glean
+    }
+
+    private func beginRecommend(
+        scope: RecommendScope,
+        requireUser: Bool,
+        from: Date,
+        to: Date,
+        slot: RecommendMessageSlot,
+        work: @escaping (RecommendContext, Int) async -> Void
+    ) {
+        recommendGen += 1
+        let generation = recommendGen
+        recommendBusy = true
+        writeRecommendMessage("주변 자리와 물때, 수온을 계산하는 중", slot: slot)
+        Task {
+            let loaded = await self.loadRecommendContext(scope: scope, requireUser: requireUser, from: from, to: to)
+            guard generation == self.recommendGen else { return }
+            switch loaded {
+            case .failure(let error):
+                self.recommendBusy = false
+                self.writeRecommendMessage(error.message, slot: slot)
+            case .success(let context):
+                await work(context, generation)
+            }
+        }
+    }
+
+    private func writeRecommendMessage(_ message: String, slot: RecommendMessageSlot) {
+        switch slot {
+        case .plan: planMessage = message
+        case .now: nowMessage = message
+        case .glean: gleanMessage = message
+        }
+    }
+
+    /// 추천 자료를 못 가져왔을 때의 안내 문장. Result의 실패 값은 Error여야 해서 문자열을 그대로 쓰지 않습니다.
+    private struct RecommendMessageError: Error {
+        let message: String
+    }
+
+    private func loadRecommendContext(
+        scope: RecommendScope,
+        requireUser: Bool,
+        from: Date,
+        to: Date
+    ) async -> Result<RecommendContext, RecommendMessageError> {
+        guard let center = recommendCenter(scope: scope, requireUser: requireUser) else {
+            if requireUser {
+                return .failure(RecommendMessageError(message: "현재 위치가 없습니다. 위치 권한을 허용해 주세요."))
+            }
+            if scope == .here {
+                return .failure(RecommendMessageError(message: "현재 위치가 없습니다. 위치 권한을 허용해 주세요."))
+            }
+            return .failure(RecommendMessageError(message: "저장된 지역이 없습니다. 지도에서 지역을 맞춘 뒤 이 지역 저장을 누르세요."))
+        }
+        let found = await candidatePoints(latitude: center.lat, longitude: center.lon, radiusKm: center.radius)
+        guard let pack = try? await cachedConditions(latitude: center.lat, longitude: center.lon) else {
+            return .failure(RecommendMessageError(message: "날씨와 바다 정보를 가져오지 못했습니다. 인터넷을 확인한 뒤 다시 누르세요."))
+        }
+        var prepared: [RecommendEngine.PreparedPoint] = []
+        for point in found {
+            let away = Geo.kilometers(center.lat, center.lon, point.latitude, point.longitude)
+            let pointPack: ConditionPack
+            if away > 12 {
+                pointPack = (try? await cachedConditions(latitude: point.latitude, longitude: point.longitude)) ?? pack
+            } else {
+                pointPack = pack
+            }
+            let travel = travelDistance(to: point, centerLat: center.lat, centerLon: center.lon)
+            prepared.append(RecommendEngine.PreparedPoint(
+                point: point,
+                pack: pointPack,
+                distanceKm: travel.km,
+                distanceFromUser: travel.fromUser
+            ))
+        }
+        let tide = await PublicTideClient.forecast(
+            latitude: center.lat,
+            longitude: center.lon,
+            from: from,
+            to: to,
+            apiKey: dataGoKrKey
+        )
+        noteTideReport(tide)
+        return .success(RecommendContext(points: prepared, tide: tide, title: center.title, from: from, to: to))
+    }
+
+    private func recommendCenter(scope: RecommendScope, requireUser: Bool) -> (lat: Double, lon: Double, radius: Double, title: String)? {
+        if requireUser || scope == .here {
+            guard let spot = mapUserSpot() else { return nil }
+            return (spot.lat, spot.lon, radiusKm, "내 위치 반경 \(Int(radiusKm))km")
+        }
+        guard let region else { return nil }
+        return (region.latitude, region.longitude, region.radiusKm, "저장 지역 \(region.name) 반경 \(Int(region.radiusKm))km")
+    }
+
+    /// 지도가 지금 쓰는 내 위치입니다. 좌표가 없으면 기본 지도 중심을 내 위치처럼 쓰지 않습니다.
+    private func mapUserSpot() -> (lat: Double, lon: Double)? {
+        guard let userLat, let userLon else { return nil }
+        return (userLat, userLon)
+    }
+
+    private func candidatePoints(latitude: Double, longitude: Double, radiusKm: Double) async -> [FishingPoint] {
+        let found = (try? await NearbyFinder.search(latitude: latitude, longitude: longitude, radiusKm: radiusKm)) ?? []
+        var points: [FishingPoint] = []
+        for point in found { appendCandidate(point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
+        for point in nearby { appendCandidate(point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
+        for point in myPoints { appendCandidate(point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
+        if let tapped { appendCandidate(tapped, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm) }
+        for briefing in briefings.values {
+            appendCandidate(briefing.point, to: &points, latitude: latitude, longitude: longitude, radiusKm: radiusKm)
+        }
+        return points
+    }
+
+    private func appendCandidate(
+        _ point: FishingPoint,
+        to points: inout [FishingPoint],
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double
+    ) {
+        guard Geo.kilometers(latitude, longitude, point.latitude, point.longitude) <= radiusKm + 0.3 else { return }
+        guard !points.contains(where: { $0.id == point.id }) else { return }
+        points.append(point)
+    }
+
+    private func travelDistance(to point: FishingPoint, centerLat: Double, centerLon: Double) -> (km: Double, fromUser: Bool) {
+        if let userLat, let userLon {
+            return (Geo.kilometers(userLat, userLon, point.latitude, point.longitude), true)
+        }
+        return (Geo.kilometers(centerLat, centerLon, point.latitude, point.longitude), false)
+    }
+
+    private func polish(_ picks: [SpotPick], generation: Int) async {
+        guard generation == recommendGen else { return }
+        let key = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            aiLink = .absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
+            return
+        }
+        guard !picks.isEmpty else { return }
+        let blocks = picks.prefix(12).map { (id: $0.id, text: $0.factScript) }
+        guard let rewritten = try? await BriefingClient.polishFacts(blocks, apiKey: key) else {
+            aiLink = .absent("인공지능 없음. 호출이 실패했습니다.")
+            return
+        }
+        guard generation == recommendGen else { return }
+        aiLink = .connected
+        func fill(_ items: inout [SpotPick]) {
+            for index in items.indices {
+                if let text = rewritten[items[index].id] {
+                    items[index].aiReason = text
+                }
+            }
+        }
+        fill(&planPicks)
+        fill(&nowPicks)
+        fill(&shorePicks)
+        fill(&skinPicks)
     }
 
     private func analyze(center: ConditionPack, latitude: Double, longitude: Double, generation: Int) async {
@@ -412,6 +675,9 @@ final class AppStore: ObservableObject {
         }
         guard generation == refreshGen else { return }
         briefings = next
+        if geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            aiLink = .absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
+        }
         if let selectedPointId, next[selectedPointId] != nil {
             await polish(id: selectedPointId, generation: generation)
         } else if geminiKey.isEmpty == false, let top = next.values.max(by: { $0.score < $1.score }) {
@@ -420,11 +686,83 @@ final class AppStore: ObservableObject {
     }
 
     private func polish(id: String, generation: Int) async {
-        guard generation == refreshGen, !geminiKey.isEmpty, var briefing = briefings[id], briefing.aiScript == nil else { return }
-        guard let text = try? await BriefingClient.rewrite(script: briefing.script, apiKey: geminiKey) else { return }
+        guard generation == refreshGen, var briefing = briefings[id], briefing.aiScript == nil else { return }
+        guard let text = await rewriteBrief(briefing.script) else { return }
         guard generation == refreshGen, briefings[id] != nil else { return }
         briefing.aiScript = text
         briefings[id] = briefing
+    }
+
+    private func rewriteBrief(_ script: String) async -> String? {
+        let key = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            aiLink = .absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
+            return nil
+        }
+        guard let text = try? await BriefingClient.rewrite(script: script, apiKey: key) else {
+            aiLink = .absent("인공지능 없음. 호출이 실패했습니다.")
+            return nil
+        }
+        aiLink = .connected
+        return text
+    }
+
+    func noteMap(ok: Bool) {
+        let key = mapboxToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            mapLink = .absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
+            return
+        }
+        mapLink = ok ? .connected : .absent("지도 없음. 호출이 실패했습니다.")
+    }
+
+    private func noteMapbox(_ reach: GeocodeReach) {
+        switch reach {
+        case .noKey:
+            mapLink = .absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
+        case .failed:
+            mapLink = .absent("지도 없음. 호출이 실패했습니다.")
+        case .ok:
+            mapLink = .connected
+        }
+    }
+
+    private func noteTide(latitude: Double, longitude: Double, generation: Int) async {
+        let from = Date()
+        let to = from.addingTimeInterval(6 * 3600)
+        let report = await PublicTideClient.forecast(
+            latitude: latitude,
+            longitude: longitude,
+            from: from,
+            to: to,
+            apiKey: dataGoKrKey
+        )
+        guard generation == refreshGen else { return }
+        noteTideReport(report)
+    }
+
+    private func noteTideReport(_ report: TideReport) {
+        let key = dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            tideLink = .absent("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
+            return
+        }
+        tideLink = report.samples.isEmpty
+            ? .absent("조석 없음. 국립해양조사원 호출이 실패했습니다.")
+            : .connected
+    }
+
+    private func resetLinksForKeys() {
+        mapLink = linkForKey(mapboxToken, emptyReason: "지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.", waiting: "지도 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: mapLink)
+        aiLink = linkForKey(geminiKey, emptyReason: "인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.", waiting: "인공지능 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: aiLink)
+        tideLink = linkForKey(dataGoKrKey, emptyReason: "조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.", waiting: "조석 없음. 인증키는 있으나 아직 호출하지 않았습니다.", current: tideLink)
+    }
+
+    private func linkForKey(_ raw: String, emptyReason: String, waiting: String, current: LinkLine) -> LinkLine {
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .absent(emptyReason) }
+        if current.connected { return current }
+        if current.reason == emptyReason || current.reason.isEmpty { return .absent(waiting) }
+        return current
     }
 
     private func cachedConditions(latitude: Double, longitude: Double) async throws -> ConditionPack {

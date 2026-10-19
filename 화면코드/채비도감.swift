@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 // 고기별 기본 채비입니다. 바람과 조차가 반영된 오늘 채비는 포인트 화면에 나옵니다.
 
@@ -107,43 +106,24 @@ struct MyPointsView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var importing = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("설정")
                     .font(.largeTitle.weight(.bold))
-                Text("암호는 이 화면에서만 넣고, 기기 열쇠고에 저장됩니다. 프로그램 파일에는 적지 않습니다.")
+                Text("암호는 이 화면에 넣지 않습니다. 연결만 여기서 봅니다.")
                     .foregroundStyle(FieldColor.muted)
 
                 FieldCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("맵박스 공개 토큰")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("연결")
                             .font(.headline)
-                        SecureField("pk. 로 시작", text: $store.mapboxToken)
-                            .textFieldStyle(.roundedBorder)
-                        Text("맵박스 계정에서 토큰을 만든 뒤 붙여 넣습니다. 지도 스타일을 읽을 수 있어야 합니다.")
-                            .font(.caption)
-                            .foregroundStyle(FieldColor.muted)
+                        Text(store.mapLink.connected ? "지도 연결됨" : store.mapLink.reason)
+                        Text(store.aiLink.connected ? "인공지능 연결됨" : store.aiLink.reason)
+                        Text(store.tideLink.connected ? "조석 연결됨" : store.tideLink.reason)
                     }
-                }
-                FieldCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("인공지능 암호")
-                            .font(.headline)
-                        SecureField("제미나이 암호", text: $store.geminiKey)
-                            .textFieldStyle(.roundedBorder)
-                        Text("구글 AI 스튜디오에서 발급한 암호입니다. 없어도 수온·물때·채비 계산은 그대로 나옵니다. 있으면 그 계산을 오늘 순서로 다듬습니다.")
-                            .font(.caption)
-                            .foregroundStyle(FieldColor.muted)
-                    }
-                }
-                HStack {
-                    Button("암호 저장") { store.saveSecrets() }
-                        .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
-                    Button("비밀 파일 불러오기") { importing = true }
-                        .buttonStyle(FieldButton(fill: FieldColor.card2))
+                    .font(.subheadline)
                 }
 
                 Text("노리는 고기")
@@ -182,10 +162,5 @@ struct SettingsView: View {
         }
         .background(FieldColor.ink)
         .foregroundStyle(FieldColor.paper)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text]) { result in
-            if case .success(let url) = result {
-                store.importSecrets(from: url)
-            }
-        }
     }
 }

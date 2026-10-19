@@ -191,6 +191,59 @@ struct PointBriefing: Identifiable {
     var conditions: ConditionPack
 }
 
+enum RecommendKind: String {
+    case plan
+    case now
+    case shore
+    case skin
+
+    var title: String {
+        switch self {
+        case .plan: return "낚시 계획"
+        case .now: return "바로가자"
+        case .shore: return "갯가 해루질"
+        case .skin: return "수중 스킨해루질"
+        }
+    }
+}
+
+enum RecommendScope {
+    case here
+    case saved
+}
+
+struct SpotFacts {
+    var weather: String
+    var wind: String
+    var pressure: String
+    var rain: String
+    var water: String
+    var wave: String
+    var seaLevel: String
+    var tide: String
+    var moon: String
+    var place: String
+}
+
+struct SpotPick: Identifiable {
+    var id: String
+    var kind: RecommendKind
+    var point: FishingPoint
+    var when: Date
+    var successRate: Int
+    var distanceKm: Double?
+    var costWon: Int?
+    var species: String
+    var reason: String
+    var whyLines: [String]
+    var facts: SpotFacts
+    var risks: [String]
+    var publicSummary: String
+    var publicWarnings: [String]
+    var factScript: String
+    var aiReason: String?
+}
+
 struct DiskBox: Codable {
     var myPoints: [FishingPoint]
     var region: SavedRegion?
