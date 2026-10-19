@@ -25,6 +25,7 @@ struct MapboxMapView: View {
     var onTap: (Double, Double) -> Void
     var onSelect: (String) -> Void
     var onMove: (Double, Double) -> Void
+    var onMap: (Bool) -> Void
 
     var body: some View {
         MapboxWebView(
@@ -38,7 +39,8 @@ struct MapboxMapView: View {
             pins: pins,
             onTap: onTap,
             onSelect: onSelect,
-            onMove: onMove
+            onMove: onMove,
+            onMap: onMap
         )
     }
 }
@@ -56,9 +58,10 @@ private struct MapboxWebView: UIViewRepresentable {
     var onTap: (Double, Double) -> Void
     var onSelect: (String) -> Void
     var onMove: (Double, Double) -> Void
+    var onMap: (Bool) -> Void
 
     func makeCoordinator() -> MapCoordinator {
-        MapCoordinator(onTap: onTap, onSelect: onSelect, onMove: onMove)
+        MapCoordinator(onTap: onTap, onSelect: onSelect, onMove: onMove, onMap: onMap)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -75,6 +78,7 @@ private struct MapboxWebView: UIViewRepresentable {
         context.coordinator.onTap = onTap
         context.coordinator.onSelect = onSelect
         context.coordinator.onMove = onMove
+        context.coordinator.onMap = onMap
         context.coordinator.push(webView, state: currentState())
     }
 
@@ -95,9 +99,10 @@ private struct MapboxWebView: NSViewRepresentable {
     var onTap: (Double, Double) -> Void
     var onSelect: (String) -> Void
     var onMove: (Double, Double) -> Void
+    var onMap: (Bool) -> Void
 
     func makeCoordinator() -> MapCoordinator {
-        MapCoordinator(onTap: onTap, onSelect: onSelect, onMove: onMove)
+        MapCoordinator(onTap: onTap, onSelect: onSelect, onMove: onMove, onMap: onMap)
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -112,6 +117,7 @@ private struct MapboxWebView: NSViewRepresentable {
         context.coordinator.onTap = onTap
         context.coordinator.onSelect = onSelect
         context.coordinator.onMove = onMove
+        context.coordinator.onMap = onMap
         context.coordinator.push(webView, state: currentState())
     }
 
@@ -171,16 +177,18 @@ final class MapCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandl
     var onTap: (Double, Double) -> Void
     var onSelect: (String) -> Void
     var onMove: (Double, Double) -> Void
+    var onMap: (Bool) -> Void
     let configuration = WKWebViewConfiguration()
     private weak var webView: WKWebView?
     private var ready = false
     private var lastJSON = ""
     private var lastFly = -1
 
-    init(onTap: @escaping (Double, Double) -> Void, onSelect: @escaping (String) -> Void, onMove: @escaping (Double, Double) -> Void) {
+    init(onTap: @escaping (Double, Double) -> Void, onSelect: @escaping (String) -> Void, onMove: @escaping (Double, Double) -> Void, onMap: @escaping (Bool) -> Void) {
         self.onTap = onTap
         self.onSelect = onSelect
         self.onMove = onMove
+        self.onMap = onMap
         super.init()
         configuration.userContentController.add(self, name: "naksi")
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -214,6 +222,9 @@ final class MapCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandl
             DispatchQueue.main.async { self.onSelect(id) }
         } else if type == "move", let lat = Self.number(body["lat"]), let lon = Self.number(body["lon"]) {
             DispatchQueue.main.async { self.onMove(lat, lon) }
+        } else if type == "map" {
+            let ok = body["ok"] as? Bool ?? false
+            DispatchQueue.main.async { self.onMap(ok) }
         }
     }
 
@@ -259,10 +270,15 @@ private enum MapPage {
       if (map || !token) return;
       mapboxgl.accessToken = token;
       map = new mapboxgl.Map({ container:'map', style:'mapbox://styles/mapbox/outdoors-v12', center:[lon, lat], zoom:zoom });
-      map.addControl(new mapboxgl.NavigationControl({ showCompass:true }), 'top-right');
+      map.addControl(new mapboxgl.NavigationControl({ showCompass:true }), 'bottom-right');
       map.addControl(new mapboxgl.ScaleControl({ unit:'metric' }), 'bottom-left');
+        map.on('error', (event) => {
+        const status = event && event.error && event.error.status;
+        if (status === 401 || status === 403) post({ type:'map', ok:false });
+      });
       map.on('load', () => {
         ready = true;
+        post({ type:'map', ok:true });
         if (map.setLanguage) { try { map.setLanguage('ko'); } catch (e) {} }
         map.addSource('radius', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
         map.addLayer({ id:'radius-fill', type:'fill', source:'radius', paint:{ 'fill-color':'#1c8c86', 'fill-opacity':0.12 } });

@@ -89,10 +89,7 @@ struct RecommendScreen: View {
             Text(store.nowMessage)
                 .font(.caption)
                 .foregroundStyle(FieldColor.muted)
-            if store.nowPicks.isEmpty {
-                Text("아직 추천이 없습니다. 위치 권한이 있어야 합니다.")
-                    .font(.subheadline)
-            }
+                .lineLimit(store.nowPicks.isEmpty ? 2 : nil)
             ForEach(store.nowPicks) { pick in
                 Button { store.selectedPickId = pick.id } label: { PickRow(pick: pick) }
                     .buttonStyle(.plain)

@@ -10,21 +10,30 @@ struct MapScreen: View {
         GeometryReader { geo in
             if geo.size.width > 860 {
                 HStack(spacing: 0) {
-                    mapStack.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    list.frame(width: 380)
+                    mapLayer.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 0) {
+                        controls
+                        if !store.ranked.isEmpty {
+                            list
+                        }
+                    }
+                    .frame(width: 380)
                 }
             } else {
                 VStack(spacing: 0) {
-                    mapStack.frame(height: max(280, geo.size.height * 0.46))
-                    list
+                    mapLayer.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    controls
+                    if !store.ranked.isEmpty {
+                        list.frame(maxHeight: min(260, geo.size.height * 0.28))
+                    }
                 }
             }
         }
         .background(FieldColor.ink)
     }
 
-    private var mapStack: some View {
-        ZStack(alignment: .topLeading) {
+    private var mapLayer: some View {
+        Group {
             if store.mapboxToken.isEmpty {
                 FieldColor.card
             } else {
@@ -39,10 +48,10 @@ struct MapScreen: View {
                     pins: pins,
                     onTap: { lat, lon in store.analyzeTap(latitude: lat, longitude: lon) },
                     onSelect: { store.select($0) },
-                    onMove: { lat, lon in store.rememberMap(latitude: lat, longitude: lon) }
+                    onMove: { lat, lon in store.rememberMap(latitude: lat, longitude: lon) },
+                    onMap: { store.noteMap(ok: $0) }
                 )
             }
-            controls
         }
     }
 
@@ -60,13 +69,13 @@ struct MapScreen: View {
     }
 
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 TextField("지역, 방파제, 포구 검색", text: $query)
                     .textFieldStyle(.plain)
-                    .padding(10)
-                    .background(FieldColor.ink.opacity(0.88))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(8)
+                    .background(FieldColor.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     .onSubmit { store.searchPlaces(query) }
                 Button("찾기") { store.searchPlaces(query) }
                     .buttonStyle(FieldButton(fill: FieldColor.sea))
@@ -80,46 +89,27 @@ struct MapScreen: View {
                             .foregroundStyle(FieldColor.paper)
                     }
                 }
-                .background(FieldColor.ink.opacity(0.92))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .background(FieldColor.card)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             if store.mapboxToken.isEmpty {
                 Text("설정에서 맵박스 암호를 넣으면 지도가 켜집니다.")
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
                     .lineLimit(1)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(FieldColor.ink)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            HStack {
-                Text(store.useMyLocation ? "내 주변" : store.regionTitle)
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(store.locationText)
-                    .font(.caption)
-                    .foregroundStyle(FieldColor.muted)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(FieldColor.ink.opacity(0.88))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .foregroundStyle(FieldColor.paper)
-
-            VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
                 Text("반경 \(Int(store.radiusKm))km")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(FieldColor.good)
+                    .lineLimit(1)
                 Slider(value: $store.radiusKm, in: 3...30, step: 1, onEditingChanged: { editing in
                     if !editing { store.refresh() }
                 })
+                Button(store.busy ? "계산 중" : "이 지역 분석") { store.refresh() }
+                    .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
+                    .disabled(store.busy)
             }
-            .padding(10)
-            .background(FieldColor.ink.opacity(0.88))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-
             HStack {
                 Button("내 위치") { store.focusOnMe() }
                     .buttonStyle(FieldButton(fill: FieldColor.card2))
@@ -127,13 +117,42 @@ struct MapScreen: View {
                     .buttonStyle(FieldButton(fill: FieldColor.card2))
                 Button("이 지역 저장") { store.saveCurrentRegion() }
                     .buttonStyle(FieldButton(fill: FieldColor.card2))
+                Spacer(minLength: 0)
             }
-            Button(store.busy ? "계산 중" : "이 지역 분석") { store.refresh() }
-                .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
-                .disabled(store.busy)
+            Text("\(store.useMyLocation ? "내 주변" : store.regionTitle) · \(store.locationText)")
+                .font(.caption2)
+                .foregroundStyle(FieldColor.muted)
+                .lineLimit(1)
+            linkRow("지도", store.mapLink)
+            linkRow("인공지능", store.aiLink)
+            linkRow("조석", store.tideLink)
+            Text(store.statusText)
+                .font(.caption)
+                .foregroundStyle(FieldColor.paper)
+                .lineLimit(1)
         }
-        .padding(12)
-        .frame(maxWidth: 420)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(FieldColor.ink)
+        .foregroundStyle(FieldColor.paper)
+    }
+
+    private func linkRow(_ title: String, _ link: LinkLine) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.caption)
+                Text(link.word)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(link.connected ? FieldColor.good : FieldColor.bad)
+            }
+            if !link.connected {
+                Text(link.reason)
+                    .font(.caption2)
+                    .foregroundStyle(FieldColor.muted)
+                    .lineLimit(1)
+            }
+        }
     }
 
     private var list: some View {
@@ -145,12 +164,8 @@ struct MapScreen: View {
                 if store.busy { ProgressView().controlSize(.small) }
             }
             .padding(.horizontal, 14)
-            .padding(.top, 12)
-            Text(store.statusText)
-                .font(.caption)
-                .foregroundStyle(FieldColor.muted)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(store.ranked) { briefing in

@@ -68,6 +68,9 @@ enum RecommendEngine {
     ) -> FishingOutcome {
         let scopeNote = scopeSentence(areaTitle: areaTitle, count: points.count, fewerThan: limit)
         guard !points.isEmpty else {
+            if kind == .now {
+                return FishingOutcome(picks: [], message: "\(areaTitle) 안에서 공개 자리, 저장 포인트, 찍은 자리가 없습니다.")
+            }
             return FishingOutcome(picks: [], message: scopeNote + " 이 반경에서 모은 자리가 없습니다.")
         }
         guard overlaps(points, from: from, to: to) else {
