@@ -12,6 +12,8 @@ struct PublicFishingNote: Identifiable, Equatable {
     /// 글에 시·분까지 적혀 있으면 참입니다. 날짜만 있으면 시각을 지어 넣지 않습니다.
     var hasClock: Bool
     var summary: String
+    /// 글에 적힌 지역입니다. 비어 있으면 어디인지 모르는 글이라 근처 목록에 넣지 않습니다.
+    var placeLabel: String
 }
 
 struct PublicSourceLine: Identifiable, Equatable {
@@ -27,6 +29,76 @@ struct PublicFishingBundle {
     var lines: [PublicSourceLine]
 
     var answered: Bool { lines.contains { $0.answered } }
+}
+
+/// 내 위치나 지정한 위치와 같은 지역 글만 고릅니다. 지역이 없는 글은 근처 글처럼 넣지 않습니다.
+enum PublicNearby {
+    private static let groups: [[String]] = [
+        ["제주", "서귀포", "애월", "한림", "성산", "우도", "모슬포", "중문", "표선", "조천", "구좌", "대정", "안덕", "추자", "김녕", "협재", "함덕"],
+        ["부산", "기장", "해운대", "영도", "다대포", "송정", "광안", "태종대", "가덕"],
+        ["인천", "영종", "강화", "을왕", "무의", "선재", "백령"],
+        ["속초", "강릉", "삼척", "양양", "주문진", "묵호"],
+        ["포항", "경주", "울진", "영덕", "울산", "구룡포"],
+        ["여수", "순천", "광양", "고흥", "완도", "진도", "목포", "해남", "강진", "장흥", "보성", "남해", "통영", "거제", "사천", "창원"],
+        ["군산", "부안", "격포", "변산", "고창", "영광", "신안"],
+        ["태안", "안면도", "보령", "대천", "서천", "무창포"],
+        ["화성", "궁평", "시흥", "안산", "평택", "영흥"],
+    ]
+
+    private static let useless: Set<String> = ["", "-", "없음", "미정", "전국", "기타", "기타지역", "지역없음"]
+
+    /// 지역 칸이 비어 있을 때만 글 문장에서 알려진 지명을 찾습니다.
+    /// 없음·전국처럼 지역이 없다고 적힌 글, 목록에 없는 지역 이름은 근처 글이 아닙니다.
+    static func label(region: String, story: String) -> String {
+        let region = region.trimmingCharacters(in: .whitespacesAndNewlines)
+        if region.isEmpty {
+            return tokens(in: story).joined(separator: " ")
+        }
+        if useless.contains(region) { return "" }
+        return tokens(in: region).joined(separator: " ")
+    }
+
+    static func canFilter(_ anchor: String) -> Bool {
+        !tokens(in: anchor).isEmpty
+    }
+
+    static func keep(_ notes: [PublicFishingNote], anchor: String) -> [PublicFishingNote] {
+        let anchorTokens = tokens(in: anchor)
+        guard !anchorTokens.isEmpty else { return [] }
+        let anchorGroups = groupIDs(for: anchorTokens)
+        return notes.filter { note in
+            let place = note.placeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !place.isEmpty, !useless.contains(place) else { return false }
+            let placeTokens = tokens(in: place)
+            let placeGroups = groupIDs(for: placeTokens)
+            if !anchorGroups.isEmpty, !placeGroups.isEmpty, !anchorGroups.isDisjoint(with: placeGroups) {
+                return true
+            }
+            if placeTokens.contains(where: { anchor.contains($0) }) { return true }
+            if anchorTokens.contains(where: { place.contains($0) }) { return true }
+            return false
+        }
+    }
+
+    private static func tokens(in text: String) -> [String] {
+        var found: [String] = []
+        for group in groups {
+            for token in group where text.contains(token) && !found.contains(token) {
+                found.append(token)
+            }
+        }
+        return found
+    }
+
+    private static func groupIDs(for tokens: [String]) -> Set<Int> {
+        var ids: Set<Int> = []
+        for (index, group) in groups.enumerated() {
+            if tokens.contains(where: { group.contains($0) }) {
+                ids.insert(index)
+            }
+        }
+        return ids
+    }
 }
 
 enum PublicFishingClient {
@@ -128,7 +200,8 @@ enum PublicFishingClient {
                 pageURL: pageURL,
                 writtenAt: when.date,
                 hasClock: when.hasClock,
-                summary: front(summary, limit: 180)
+                summary: front(summary, limit: 180),
+                placeLabel: PublicNearby.label(region: region, story: title)
             ))
             if notes.count == 8 { break }
         }
@@ -219,7 +292,8 @@ enum PublicFishingClient {
             pageURL: pageURL,
             writtenAt: when.date,
             hasClock: true,
-            summary: front(text, limit: 180)
+            summary: front(text, limit: 180),
+            placeLabel: PublicNearby.label(region: "", story: text)
         )
     }
 
@@ -271,7 +345,8 @@ enum PublicFishingClient {
             pageURL: pageURL,
             writtenAt: when.date,
             hasClock: true,
-            summary: front(text, limit: 180)
+            summary: front(text, limit: 180),
+            placeLabel: PublicNearby.label(region: "", story: text)
         )
     }
 
@@ -317,7 +392,8 @@ enum PublicFishingClient {
             pageURL: pageURL,
             writtenAt: when.date,
             hasClock: true,
-            summary: front(text, limit: 180)
+            summary: front(text, limit: 180),
+            placeLabel: PublicNearby.label(region: "", story: text)
         )
     }
 
@@ -356,7 +432,8 @@ enum PublicFishingClient {
                 pageURL: pageURL,
                 writtenAt: when.date,
                 hasClock: when.hasClock,
-                summary: summary
+                summary: summary,
+                placeLabel: PublicNearby.label(region: "", story: "\(title) \(body)")
             ))
             if notes.count == 6 { break }
         }

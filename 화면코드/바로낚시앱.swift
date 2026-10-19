@@ -18,28 +18,32 @@ struct AppShell: View {
                     ChartScreen()
                         .tabItem { Label("바다해도", systemImage: "water.waves") }
                         .tag(1)
-                    RecommendFishingHost()
+                    RecommendScreen()
                         .tabItem { Label("추천", systemImage: "star.circle") }
                         .tag(2)
+                    PublicFishingScreen()
+                        .tabItem { Label("낚시글", systemImage: "doc.text") }
+                        .tag(3)
                     TackleLibraryView()
                         .tabItem { Label("채비", systemImage: "wrench.and.screwdriver") }
-                        .tag(3)
+                        .tag(4)
                     MyPointsView()
                         .tabItem { Label("내 포인트", systemImage: "mappin") }
-                        .tag(4)
+                        .tag(5)
                     SettingsView()
                         .tabItem { Label("설정", systemImage: "gearshape") }
-                        .tag(5)
+                        .tag(6)
                 }
                 .onChange(of: phoneTab) { newValue in
-                    if newValue == 2 { PublicFishingBoard.shared.refreshIfNeeded() }
+                    if newValue == 3 { PublicFishingBoard.shared.refreshIfNeeded() }
                 }
             } else {
                 NavigationView {
                     List {
                         NavigationLink { MapScreen() } label: { Label("지도", systemImage: "map") }
                         NavigationLink { ChartScreen() } label: { Label("바다해도", systemImage: "water.waves") }
-                        NavigationLink { RecommendFishingHost() } label: { Label("추천", systemImage: "star.circle") }
+                        NavigationLink { RecommendScreen() } label: { Label("추천", systemImage: "star.circle") }
+                        NavigationLink { PublicFishingScreen() } label: { Label("낚시글", systemImage: "doc.text") }
                         NavigationLink { TackleLibraryView() } label: { Label("채비도감", systemImage: "wrench.and.screwdriver") }
                         NavigationLink { MyPointsView() } label: { Label("내 포인트", systemImage: "mappin") }
                         NavigationLink { SettingsView() } label: { Label("설정", systemImage: "gearshape") }
