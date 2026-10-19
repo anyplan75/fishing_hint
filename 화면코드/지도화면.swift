@@ -26,7 +26,7 @@ struct MapScreen: View {
     private var mapStack: some View {
         ZStack(alignment: .topLeading) {
             if store.mapboxToken.isEmpty {
-                missingToken
+                FieldColor.card
             } else {
                 MapboxMapView(
                     token: store.mapboxToken,
@@ -82,6 +82,17 @@ struct MapScreen: View {
                 }
                 .background(FieldColor.ink.opacity(0.92))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            if store.mapboxToken.isEmpty {
+                Text("설정에서 맵박스 암호를 넣으면 지도가 켜집니다.")
+                    .font(.caption)
+                    .foregroundStyle(FieldColor.muted)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(FieldColor.ink)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             HStack {
                 Text(store.useMyLocation ? "내 주변" : store.regionTitle)
@@ -154,19 +165,6 @@ struct MapScreen: View {
         }
         .background(FieldColor.ink)
         .foregroundStyle(FieldColor.paper)
-    }
-
-    private var missingToken: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("지도 암호가 없습니다")
-                .font(.title3.weight(.bold))
-            Text("설정에서 맵박스 공개 토큰을 넣으면 이 자리에 지도가 켜집니다. 토큰 없이도 지역을 저장한 뒤 목록 분석은 할 수 있지만, 지도를 누르는 기능은 토큰이 있어야 합니다.")
-                .font(.subheadline)
-                .foregroundStyle(FieldColor.muted)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(FieldColor.card)
     }
 }
 
