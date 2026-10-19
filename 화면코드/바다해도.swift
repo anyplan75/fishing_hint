@@ -198,14 +198,13 @@ private struct HaereumWebView: UIViewRepresentable {
     func makeCoordinator() -> HaereumCoordinator { HaereumCoordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero)
-        webView.isOpaque = false
-        webView.backgroundColor = .black
-        webView.scrollView.isScrollEnabled = false
+        let webView = MapGestureWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        webView.releasePageGestures()
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
+        (webView as? MapGestureWebView)?.releasePageGestures()
         context.coordinator.load(webView, script: script, latitude: latitude, longitude: longitude)
     }
 }
@@ -253,9 +252,9 @@ private enum HaereumPage {
         <html>
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          html, body, #map { margin:0; height:100%; background:#071014; }
+          html, body, #map { margin:0; height:100%; background:#071014; touch-action:none; }
           #note { position:absolute; left:8px; right:8px; bottom:8px; color:#e8efe6; font:13px -apple-system, sans-serif; }
         </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/openlayers/2.13.1/OpenLayers.js"></script>
@@ -283,14 +282,37 @@ private enum HaereumPage {
           }
           OpenLayers.IMAGE_RELOAD_ATTEMPTS = 3;
           OpenLayers.Util.onImageLoadErrorColor = "transparent";
+          var baseRes = 1954.597389;
+          var resolutions = [];
+          var serverResolutions = [];
+          for (var level = 0; level < 8; level++) {
+            var value = baseRes / Math.pow(2, level);
+            resolutions.push(value);
+            if (level < 5) serverResolutions.push(value);
+          }
+          OtmsLayer.serverResolutions = serverResolutions;
+          OtmsLayer.getURL = function(bounds) {
+            var res = this.getServerResolution();
+            var zoom = this.getServerZoom();
+            if (!(zoom >= 0)) zoom = Math.max(0, Math.min(4, this.map.getZoom()));
+            var x = Math.round((bounds.left - apiMapBounds_tile.left) / (res * this.tileSize.w));
+            var y = Math.round((bounds.bottom - apiMapBounds_tile.bottom) / (res * this.tileSize.h));
+            var z = zoom + 6;
+            if (z > 10) z = 10;
+            if (z < 6) z = 6;
+            var label = (z < 10 ? "0" : "") + z;
+            var join = this.url.indexOf("?") < 0 ? "?" : "&";
+            return this.url + join + "z=L" + label + "&y=" + y + "&x=" + x;
+          };
           var map = new OpenLayers.Map("map", {
             projection: new OpenLayers.Projection("EPSG:5179"),
             displayProjection: new OpenLayers.Projection("EPSG:4326"),
             maxExtent: new OpenLayers.Bounds(-200000.0, -3015.4524155292, 3803015.45241553, 4000000.0),
             restrictedExtent: new OpenLayers.Bounds(37953.1466, 1126946.7253, 2152527.8074, 2873292.7040),
             allOverlays: true,
-            maxResolution: 1954.597389,
-            numZoomLevels: 5,
+            resolutions: resolutions,
+            maxResolution: resolutions[0],
+            numZoomLevels: resolutions.length,
             layers: [OtmsLayer],
             controls: []
           });
@@ -299,6 +321,7 @@ private enum HaereumPage {
             new OpenLayers.Projection("EPSG:5179")
           );
           window.chartMap = map;
+          var placed = false;
           function placeChart() {
             var box = document.getElementById("map");
             if (window.innerWidth > 20 && window.innerHeight > 20) {
@@ -306,7 +329,10 @@ private enum HaereumPage {
               box.style.height = window.innerHeight + "px";
             }
             map.updateSize();
-            map.setCenter(center, 4);
+            if (!placed && window.innerHeight > 80) {
+              map.setCenter(center, 4);
+              placed = true;
+            }
           }
           placeChart();
           window.addEventListener("resize", placeChart);
@@ -314,9 +340,12 @@ private enum HaereumPage {
           var timer = setInterval(function() {
             tries += 1;
             placeChart();
-            if (tries > 12) clearInterval(timer);
+            if (placed || tries > 12) clearInterval(timer);
           }, 300);
-          map.addControl(new OpenLayers.Control.Navigation());
+          map.addControl(new OpenLayers.Control.Navigation({
+            dragPanOptions: { enableKinetic: true },
+            pinchZoomOptions: { autoActivate: true }
+          }));
         }
         window.onload = startChart;
         </script>

@@ -4,6 +4,46 @@ import WebKit
 // 맵박스 공식 지도 엔진으로 지도를 그립니다.
 // 내 위치는 폰·맥이 재서 지도 위에 올립니다. 지도 암호는 빌드할 때 넣은 값을 읽습니다.
 
+#if os(iOS)
+// 웹 화면의 스크롤이 두 손가락 확대와 한 손가락 옮기기를 삼키지 않게 합니다.
+// 인식기는 화면이 붙은 뒤에 생기므로, 레이아웃마다 다시 끕니다.
+final class MapGestureWebView: WKWebView {
+    override init(frame: CGRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        isOpaque = false
+        backgroundColor = .black
+        releasePageGestures()
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        releasePageGestures()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        releasePageGestures()
+    }
+
+    func releasePageGestures() {
+        let scroll = scrollView
+        scroll.isScrollEnabled = false
+        scroll.bounces = false
+        scroll.delaysContentTouches = false
+        scroll.canCancelContentTouches = false
+        for recognizer in scroll.gestureRecognizers ?? [] {
+            if recognizer is UIPinchGestureRecognizer || recognizer is UIPanGestureRecognizer {
+                recognizer.isEnabled = false
+            }
+        }
+    }
+}
+#endif
+
 struct MapPin: Identifiable {
     var id: String
     var name: String
@@ -65,16 +105,15 @@ private struct MapboxWebView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero, configuration: context.coordinator.configuration)
+        let webView = MapGestureWebView(frame: .zero, configuration: context.coordinator.configuration)
         webView.navigationDelegate = context.coordinator
-        webView.isOpaque = false
-        webView.backgroundColor = .black
-        webView.scrollView.isScrollEnabled = false
+        webView.releasePageGestures()
         webView.loadHTMLString(MapPage.html, baseURL: URL(string: "https://api.mapbox.com"))
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
+        (webView as? MapGestureWebView)?.releasePageGestures()
         context.coordinator.onTap = onTap
         context.coordinator.onSelect = onSelect
         context.coordinator.onMove = onMove
@@ -239,11 +278,11 @@ private enum MapPage {
     <!DOCTYPE html>
     <html>
     <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://api.mapbox.com/mapbox-gl-js/v3.17.0/mapbox-gl.css" rel="stylesheet">
     <script src="https://api.mapbox.com/mapbox-gl-js/v3.17.0/mapbox-gl.js"></script>
     <style>
-      html, body, #map { margin:0; height:100%; background:#071018; }
+      html, body, #map { margin:0; height:100%; background:#071018; touch-action:none; }
       .mapboxgl-ctrl-attrib { font-size:10px; }
     </style>
     </head>
@@ -269,7 +308,16 @@ private enum MapPage {
     function ensure(token, lon, lat, zoom) {
       if (map || !token) return;
       mapboxgl.accessToken = token;
-      map = new mapboxgl.Map({ container:'map', style:'mapbox://styles/mapbox/outdoors-v12', center:[lon, lat], zoom:zoom });
+      map = new mapboxgl.Map({
+        container:'map',
+        style:'mapbox://styles/mapbox/outdoors-v12',
+        center:[lon, lat],
+        zoom:zoom,
+        dragPan:true,
+        scrollZoom:true,
+        touchZoomRotate:true,
+        doubleClickZoom:true
+      });
       map.addControl(new mapboxgl.NavigationControl({ showCompass:true }), 'bottom-right');
       map.addControl(new mapboxgl.ScaleControl({ unit:'metric' }), 'bottom-left');
         map.on('error', (event) => {
