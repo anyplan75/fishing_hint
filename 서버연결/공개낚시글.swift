@@ -548,14 +548,16 @@ enum PublicWhen {
               (0...69).contains(year), (1...12).contains(month), (1...31).contains(day) else { return nil }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? TimeZone(secondsFromGMT: 9 * 60 * 60) ?? .current
-        calendar.isLenient = false
         var pieces = DateComponents()
         pieces.calendar = calendar
         pieces.timeZone = calendar.timeZone
         pieces.year = 2000 + year
         pieces.month = month
         pieces.day = day
-        return pieces.date
+        guard let date = calendar.date(from: pieces) else { return nil }
+        let check = calendar.dateComponents([.year, .month, .day], from: date)
+        guard check.year == pieces.year, check.month == pieces.month, check.day == pieces.day else { return nil }
+        return date
     }
 
     static func dayStamp(_ date: Date) -> String {
