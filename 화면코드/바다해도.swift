@@ -27,7 +27,7 @@ struct ChartScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("바다해도")
                 .font(.largeTitle.weight(.bold))
-            Text("국립해양조사원 해어름을 그들이 공개한 방식으로 봅니다. 맵박스 지도와 겹치지 않습니다. 항해용으로 쓰지 마세요.")
+            Text("지금 자리의 바다 지도입니다. 항해용으로 쓰지 마세요.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             HStack(spacing: 8) {
@@ -42,20 +42,11 @@ struct ChartScreen: View {
             if store.haereumKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 missingKey
             } else if mapScript == nil, let rejection {
-                FieldCard {
-                    Text(rejection)
-                        .font(.subheadline)
-                }
-            } else if let place = chosenPlace() {
-                if let rejection {
-                    FieldCard {
-                        Text(rejection)
-                            .font(.subheadline)
-                    }
-                }
-                Text("\(place.title) 주변입니다. 수심·위험은 공개 응답에 글이 있을 때만 적습니다.")
+                Text(rejection)
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
+                    .lineLimit(2)
+            } else if let place = chosenPlace() {
                 if let mapScript {
                     HaereumMapView(
                         script: mapScript,
@@ -63,13 +54,22 @@ struct ChartScreen: View {
                         longitude: place.longitude
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minHeight: 320)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                 } else if !facts.isEmpty {
                     Text("배경 지도를 불러오지 못했습니다.")
                         .font(.subheadline)
                         .foregroundStyle(FieldColor.muted)
                 }
-                factList
+                if let rejection {
+                    Text(rejection)
+                        .font(.caption)
+                        .foregroundStyle(FieldColor.muted)
+                        .lineLimit(2)
+                }
+                if !facts.isEmpty {
+                    factList
+                }
             } else {
                 missingPlace
             }
@@ -234,10 +234,14 @@ private final class HaereumCoordinator {
 
     func load(_ webView: WKWebView, script: String, latitude: Double, longitude: Double) {
         let next = String(format: "%.4f,%.4f,%d", latitude, longitude, script.hashValue)
-        guard next != signature else { return }
-        signature = next
-        let html = HaereumPage.html(script: script, latitude: latitude, longitude: longitude)
-        webView.loadHTMLString(html, baseURL: URL(string: "https://www.khoa.go.kr"))
+        if next != signature {
+            signature = next
+            let html = HaereumPage.html(script: script, latitude: latitude, longitude: longitude)
+            webView.loadHTMLString(html, baseURL: URL(string: "https://www.khoa.go.kr"))
+        }
+        if webView.bounds.width > 1, webView.bounds.height > 1 {
+            webView.evaluateJavaScript("if (window.chartMap) { window.chartMap.updateSize(); }", completionHandler: nil)
+        }
     }
 }
 
@@ -257,6 +261,7 @@ private enum HaereumPage {
         <script src="https://cdnjs.cloudflare.com/ajax/libs/openlayers/2.13.1/OpenLayers.js"></script>
         <script src="https://www.khoa.go.kr/oceanmap/js/proj4js-1.1.0/lib/proj4js.js"></script>
         <script src="https://www.khoa.go.kr/oceanmap/js/proj4js-1.1.0/lib/defs/EPSG5179.js"></script>
+        <script src="https://www.khoa.go.kr/oceanmap/js/proj4js-1.1.0/lib/projCode/tmerc.js"></script>
         <script src="https://www.khoa.go.kr/oceanmap/js/gis/OtmsApi.js"></script>
         <script>
         \(source)
@@ -285,7 +290,7 @@ private enum HaereumPage {
             restrictedExtent: new OpenLayers.Bounds(37953.1466, 1126946.7253, 2152527.8074, 2873292.7040),
             allOverlays: true,
             maxResolution: 1954.597389,
-            numZoomLevels: 11,
+            numZoomLevels: 5,
             layers: [OtmsLayer],
             controls: []
           });
@@ -293,7 +298,24 @@ private enum HaereumPage {
             new OpenLayers.Projection("EPSG:4326"),
             new OpenLayers.Projection("EPSG:5179")
           );
-          map.setCenter(center, 8);
+          window.chartMap = map;
+          function placeChart() {
+            var box = document.getElementById("map");
+            if (window.innerWidth > 20 && window.innerHeight > 20) {
+              box.style.width = window.innerWidth + "px";
+              box.style.height = window.innerHeight + "px";
+            }
+            map.updateSize();
+            map.setCenter(center, 4);
+          }
+          placeChart();
+          window.addEventListener("resize", placeChart);
+          var tries = 0;
+          var timer = setInterval(function() {
+            tries += 1;
+            placeChart();
+            if (tries > 12) clearInterval(timer);
+          }, 300);
           map.addControl(new OpenLayers.Control.Navigation());
         }
         window.onload = startChart;
