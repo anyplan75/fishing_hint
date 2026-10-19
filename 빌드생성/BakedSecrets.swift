@@ -3,4 +3,5 @@ enum BakedSecrets {
     static let mapbox = ""
     static let gemini = ""
     static let dataGoKr = ""
+    static let khoaHaereum = ""
 }

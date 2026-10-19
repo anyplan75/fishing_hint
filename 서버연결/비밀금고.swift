@@ -7,6 +7,8 @@ struct SecretPair {
     var mapbox: String
     var gemini: String
     var dataGoKr: String
+    /// 바다해도(해어름)만 읽는 키입니다. 조석예보 키와 다릅니다.
+    var haereum: String
 }
 
 enum SecretVault {
@@ -14,7 +16,8 @@ enum SecretVault {
         SecretPair(
             mapbox: BakedSecrets.mapbox,
             gemini: BakedSecrets.gemini,
-            dataGoKr: BakedSecrets.dataGoKr
+            dataGoKr: BakedSecrets.dataGoKr,
+            haereum: BakedSecrets.khoaHaereum
         )
     }
 }

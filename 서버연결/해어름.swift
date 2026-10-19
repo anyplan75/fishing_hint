@@ -69,25 +69,27 @@ enum HaereumClient {
         return parts?.string
     }
 
-    /// 글 자료와 배경 지도 스크립트를 같이 준비합니다. 키 거절이면 지도도 사실도 연결됨처럼 보이지 않습니다.
+    /// 해어름 키로만 부릅니다. 배경 지도가 받아지면 그림을 남기고, 지점 글만 거절되면 그 이유만 짧게 붙입니다.
+    /// 배경 지도까지 거절되면 그림을 연결됨으로 두지 않습니다.
     static func load(latitude: Double, longitude: Double, apiKey: String) async throws -> ChartLoad {
         let key = normalizedKey(apiKey)
         guard !key.isEmpty else { return ChartLoad(script: nil, rejection: nil, facts: []) }
-        let found: [ChartFact]
+        var found: [ChartFact] = []
+        var factNote: String?
         do {
             found = try await facts(latitude: latitude, longitude: longitude, apiKey: key)
         } catch let error as ChartKeyRejection {
-            return ChartLoad(script: nil, rejection: error.line, facts: [])
+            factNote = error.line.replacingOccurrences(of: "해도 거절", with: "지점 글 거절")
         }
         do {
             let script = try await basemapBody(apiKey: key)
-            return ChartLoad(script: script, rejection: nil, facts: found)
+            return ChartLoad(script: script, rejection: factNote, facts: found)
         } catch let error as ChartKeyRejection {
             return ChartLoad(script: nil, rejection: error.line, facts: [])
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            return ChartLoad(script: nil, rejection: nil, facts: found)
+            return ChartLoad(script: nil, rejection: factNote, facts: found)
         }
     }
 

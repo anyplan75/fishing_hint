@@ -71,6 +71,8 @@ final class AppStore: ObservableObject {
     @Published var searchHits: [PlaceNameClient.Hit] = []
     @Published var regionTitle = "선택한 지역"
     @Published var dataGoKrKey = ""
+    /// 바다해도만 씁니다. 조석예보 키와 섞지 않습니다.
+    @Published var haereumKey = ""
     @Published var planPicks: [SpotPick] = []
     @Published var nowPicks: [SpotPick] = []
     @Published var shorePicks: [SpotPick] = []
@@ -108,6 +110,7 @@ final class AppStore: ObservableObject {
         mapboxToken = secrets.mapbox
         geminiKey = secrets.gemini
         dataGoKrKey = secrets.dataGoKr
+        haereumKey = secrets.haereum
         locator.onFix = { [weak self] coordinate in
             self?.applyFix(coordinate)
         }

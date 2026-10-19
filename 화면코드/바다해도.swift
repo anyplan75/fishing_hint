@@ -39,14 +39,20 @@ struct ChartScreen: View {
                         ))
                 }
             }
-            if store.dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if store.haereumKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 missingKey
-            } else if let rejection {
+            } else if mapScript == nil, let rejection {
                 FieldCard {
                     Text(rejection)
                         .font(.subheadline)
                 }
             } else if let place = chosenPlace() {
+                if let rejection {
+                    FieldCard {
+                        Text(rejection)
+                            .font(.subheadline)
+                    }
+                }
                 Text("\(place.title) 주변입니다. 수심·위험은 공개 응답에 글이 있을 때만 적습니다.")
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
@@ -78,7 +84,7 @@ struct ChartScreen: View {
 
     private var missingKey: some View {
         FieldCard {
-            Text("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다. 키가 없으면 해도를 부르지 않습니다.")
+            Text("해도 없음. 비밀 파일에 KHOA_HAEREUM_KEY 가 없습니다. 해양공간정보 키로는 해도를 부르지 않습니다.")
                 .font(.subheadline)
         }
     }
@@ -95,7 +101,7 @@ struct ChartScreen: View {
     private var factList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                if facts.isEmpty {
+                if facts.isEmpty && rejection == nil {
                     Text("이 지점의 글을 가져오는 중입니다.")
                         .font(.caption)
                         .foregroundStyle(FieldColor.muted)
@@ -116,7 +122,7 @@ struct ChartScreen: View {
     }
 
     private var reloadKey: String {
-        let key = store.dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = store.haereumKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let place = chosenPlace()
         let lat = place.map { String(format: "%.4f", $0.latitude) } ?? "-"
         let lon = place.map { String(format: "%.4f", $0.longitude) } ?? "-"
@@ -148,7 +154,7 @@ struct ChartScreen: View {
     }
 
     private func reloadFacts() async {
-        let key = store.dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = store.haereumKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty, let place = chosenPlace() else {
             facts = []
             mapScript = nil
