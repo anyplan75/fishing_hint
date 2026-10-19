@@ -12,6 +12,8 @@ struct AppShell: View {
                 TabView {
                     MapScreen()
                         .tabItem { Label("지도", systemImage: "map") }
+                    ChartScreen()
+                        .tabItem { Label("바다해도", systemImage: "water.waves") }
                     RecommendScreen()
                         .tabItem { Label("추천", systemImage: "star.circle") }
                     TackleLibraryView()
@@ -25,6 +27,7 @@ struct AppShell: View {
                 NavigationSplitView {
                     List {
                         NavigationLink { MapScreen() } label: { Label("지도", systemImage: "map") }
+                        NavigationLink { ChartScreen() } label: { Label("바다해도", systemImage: "water.waves") }
                         NavigationLink { RecommendScreen() } label: { Label("추천", systemImage: "star.circle") }
                         NavigationLink { TackleLibraryView() } label: { Label("채비도감", systemImage: "wrench.and.screwdriver") }
                         NavigationLink { MyPointsView() } label: { Label("내 포인트", systemImage: "mappin") }
