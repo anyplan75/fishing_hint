@@ -143,9 +143,9 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("조석예보 인증키")
                             .font(.headline)
-                        SecureField("공공데이터포털 인증키", text: $store.dataGoKrKey)
+                        SecureField("국립해양조사원 인증키", text: $store.dataGoKrKey)
                             .textFieldStyle(.roundedBorder)
-                        Text("국립해양조사원 조석예보를 볼 때만 씁니다. 비워 두면 들물·날물은 바다 예보 모델만 보여 줍니다. 인코딩하지 않은 키를 넣으세요. 어장 경고는 키 없이도 앱 안의 공개 파일을 봅니다.")
+                        Text("조석예보와 해어름은 이 칸 하나의 키만 같이 씁니다. 국립해양조사원 인증키를 그대로 붙여 넣으세요. 인코딩하지 마세요. 비워 두면 들물·날물은 바다 예보 모델만 보여 줍니다. 그 모델은 조석이 연결된 것이 아닙니다. 해어름 그림은 공개 문서에서 지도 그림 주소를 확인하지 못해 겹치지 않고, 지도는 맵박스만 나옵니다. 어장 경고는 키 없이도 앱 안의 공개 파일을 봅니다.")
                             .font(.caption)
                             .foregroundStyle(FieldColor.muted)
                     }
