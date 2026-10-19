@@ -93,7 +93,7 @@ struct MapScreen: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             if store.mapboxToken.isEmpty {
-                Text("설정에서 맵박스 암호를 넣으면 지도가 켜집니다.")
+                Text("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
                     .lineLimit(1)

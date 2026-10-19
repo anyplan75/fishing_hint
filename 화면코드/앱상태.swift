@@ -80,9 +80,9 @@ final class AppStore: ObservableObject {
     @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 주간과 야간을 고른 뒤 갯가와 수중을 나눠 보여 줍니다."
     @Published var recommendBusy = false
     @Published var selectedPickId: String?
-    @Published var mapLink = LinkLine.absent("지도 없음. 설정에 맵박스 암호가 없습니다.")
-    @Published var aiLink = LinkLine.absent("인공지능 없음. 설정에 제미나이 암호가 없습니다.")
-    @Published var tideLink = LinkLine.absent("조석 없음. 설정에 국립해양조사원 인증키가 없습니다.")
+    @Published var mapLink = LinkLine.absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
+    @Published var aiLink = LinkLine.absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
+    @Published var tideLink = LinkLine.absent("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
 
     private let locator = LocationFixer()
     private var cache: [String: ConditionPack] = [:]
@@ -102,9 +102,9 @@ final class AppStore: ObservableObject {
     func start() {
         loadDisk()
         let secrets = SecretVault.load()
-        if mapboxToken.isEmpty { mapboxToken = secrets.mapbox }
-        if geminiKey.isEmpty { geminiKey = secrets.gemini }
-        if dataGoKrKey.isEmpty { dataGoKrKey = secrets.dataGoKr }
+        mapboxToken = secrets.mapbox
+        geminiKey = secrets.gemini
+        dataGoKrKey = secrets.dataGoKr
         locator.onFix = { [weak self] coordinate in
             self?.applyFix(coordinate)
         }
@@ -390,33 +390,6 @@ final class AppStore: ObservableObject {
         saveDisk()
     }
 
-    func saveSecrets() {
-        SecretVault.save(SecretPair(
-            mapbox: mapboxToken.trimmingCharacters(in: .whitespacesAndNewlines),
-            gemini: geminiKey.trimmingCharacters(in: .whitespacesAndNewlines),
-            dataGoKr: dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        ))
-        mapboxToken = mapboxToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        geminiKey = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        dataGoKrKey = dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        resetLinksForKeys()
-        statusText = "암호를 이 기기의 열쇠고에 저장했습니다."
-    }
-
-    func importSecrets(from url: URL) {
-        let allowed = url.startAccessingSecurityScopedResource()
-        defer { if allowed { url.stopAccessingSecurityScopedResource() } }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            statusText = "비밀 파일을 읽지 못했습니다."
-            return
-        }
-        let pair = SecretVault.parse(text)
-        if !pair.mapbox.isEmpty { mapboxToken = pair.mapbox }
-        if !pair.gemini.isEmpty { geminiKey = pair.gemini }
-        if !pair.dataGoKr.isEmpty { dataGoKrKey = pair.dataGoKr }
-        saveSecrets()
-    }
-
     func toggleSpecies(_ name: String) {
         if let index = preferSpecies.firstIndex(of: name) {
             preferSpecies.remove(at: index)
@@ -649,7 +622,7 @@ final class AppStore: ObservableObject {
         guard generation == recommendGen else { return }
         let key = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            aiLink = .absent("인공지능 없음. 설정에 제미나이 암호가 없습니다.")
+            aiLink = .absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
             return
         }
         guard !picks.isEmpty else { return }
@@ -703,7 +676,7 @@ final class AppStore: ObservableObject {
         guard generation == refreshGen else { return }
         briefings = next
         if geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            aiLink = .absent("인공지능 없음. 설정에 제미나이 암호가 없습니다.")
+            aiLink = .absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
         }
         if let selectedPointId, next[selectedPointId] != nil {
             await polish(id: selectedPointId, generation: generation)
@@ -723,7 +696,7 @@ final class AppStore: ObservableObject {
     private func rewriteBrief(_ script: String) async -> String? {
         let key = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            aiLink = .absent("인공지능 없음. 설정에 제미나이 암호가 없습니다.")
+            aiLink = .absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
             return nil
         }
         guard let text = try? await BriefingClient.rewrite(script: script, apiKey: key) else {
@@ -737,7 +710,7 @@ final class AppStore: ObservableObject {
     func noteMap(ok: Bool) {
         let key = mapboxToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            mapLink = .absent("지도 없음. 설정에 맵박스 암호가 없습니다.")
+            mapLink = .absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
             return
         }
         mapLink = ok ? .connected : .absent("지도 없음. 호출이 실패했습니다.")
@@ -746,7 +719,7 @@ final class AppStore: ObservableObject {
     private func noteMapbox(_ reach: GeocodeReach) {
         switch reach {
         case .noKey:
-            mapLink = .absent("지도 없음. 설정에 맵박스 암호가 없습니다.")
+            mapLink = .absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
         case .failed:
             mapLink = .absent("지도 없음. 호출이 실패했습니다.")
         case .ok:
@@ -771,7 +744,7 @@ final class AppStore: ObservableObject {
     private func noteTideReport(_ report: TideReport) {
         let key = dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            tideLink = .absent("조석 없음. 설정에 국립해양조사원 인증키가 없습니다.")
+            tideLink = .absent("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
             return
         }
         tideLink = report.samples.isEmpty
@@ -780,9 +753,9 @@ final class AppStore: ObservableObject {
     }
 
     private func resetLinksForKeys() {
-        mapLink = linkForKey(mapboxToken, emptyReason: "지도 없음. 설정에 맵박스 암호가 없습니다.", waiting: "지도 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: mapLink)
-        aiLink = linkForKey(geminiKey, emptyReason: "인공지능 없음. 설정에 제미나이 암호가 없습니다.", waiting: "인공지능 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: aiLink)
-        tideLink = linkForKey(dataGoKrKey, emptyReason: "조석 없음. 설정에 국립해양조사원 인증키가 없습니다.", waiting: "조석 없음. 인증키는 있으나 아직 호출하지 않았습니다.", current: tideLink)
+        mapLink = linkForKey(mapboxToken, emptyReason: "지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.", waiting: "지도 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: mapLink)
+        aiLink = linkForKey(geminiKey, emptyReason: "인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.", waiting: "인공지능 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: aiLink)
+        tideLink = linkForKey(dataGoKrKey, emptyReason: "조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.", waiting: "조석 없음. 인증키는 있으나 아직 호출하지 않았습니다.", current: tideLink)
     }
 
     private func linkForKey(_ raw: String, emptyReason: String, waiting: String, current: LinkLine) -> LinkLine {

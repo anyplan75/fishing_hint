@@ -65,7 +65,7 @@ struct ChartScreen: View {
 
     private var missingKey: some View {
         FieldCard {
-            Text("설정에 조석예보 인증키를 넣으세요. 바다해도도 그 칸 하나를 같이 씁니다. 키가 없으면 해도를 부르지 않습니다.")
+            Text("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다. 키가 없으면 해도를 부르지 않습니다.")
                 .font(.subheadline)
         }
     }

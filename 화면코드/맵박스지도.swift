@@ -2,7 +2,7 @@ import SwiftUI
 import WebKit
 
 // 맵박스 공식 지도 엔진으로 지도를 그립니다.
-// 내 위치는 폰·맥이 재서 지도 위에 올리고, 지도 암호는 설정에서만 읽습니다.
+// 내 위치는 폰·맥이 재서 지도 위에 올립니다. 지도 암호는 빌드할 때 넣은 값을 읽습니다.
 
 struct MapPin: Identifiable {
     var id: String

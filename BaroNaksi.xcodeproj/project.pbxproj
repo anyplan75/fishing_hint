@@ -6,9 +6,14 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E10000000000000000000016 /* BakedSecrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000015 /* BakedSecrets.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		E10000000000000000000004 /* BaroNaksi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BaroNaksi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E10000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E10000000000000000000015 /* BakedSecrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BakedSecrets.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -34,6 +39,7 @@
 				E10000000000000000000011 /* 화면코드 */,
 				E10000000000000000000012 /* 서버연결 */,
 				E10000000000000000000013 /* 분석엔진 */,
+				E10000000000000000000014 /* 빌드생성 */,
 				E10000000000000000000005 /* Info.plist */,
 				E10000000000000000000003 /* Products */,
 			);
@@ -47,6 +53,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		E10000000000000000000014 /* 빌드생성 */ = {
+			isa = PBXGroup;
+			children = (
+				E10000000000000000000015 /* BakedSecrets.swift */,
+			);
+			path = "빌드생성";
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -54,6 +68,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = E10000000000000000000042 /* Build configuration list for PBXNativeTarget "BaroNaksi" */;
 			buildPhases = (
+				E10000000000000000000024 /* 비밀 파일 읽기 */,
 				E10000000000000000000021 /* Sources */,
 				E10000000000000000000022 /* Frameworks */,
 				E10000000000000000000023 /* Resources */,
@@ -117,11 +132,31 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		E10000000000000000000024 /* 비밀 파일 읽기 */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "비밀 파일 읽기";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/빌드스크립트/비밀파일읽기.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		E10000000000000000000021 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E10000000000000000000016 /* BakedSecrets.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,7 +173,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -160,7 +195,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				SDKROOT = auto;

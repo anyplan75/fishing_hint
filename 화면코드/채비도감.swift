@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 // 고기별 기본 채비입니다. 바람과 조차가 반영된 오늘 채비는 포인트 화면에 나옵니다.
 
@@ -107,55 +106,15 @@ struct MyPointsView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var importing = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("설정")
                     .font(.largeTitle.weight(.bold))
-                Text("암호는 이 화면에서만 넣고, 기기 열쇠고에 저장됩니다. 프로그램 파일에는 적지 않습니다.")
+                Text("암호는 이 화면에 넣지 않습니다. 연결만 여기서 봅니다.")
                     .foregroundStyle(FieldColor.muted)
 
-                FieldCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("맵박스 공개 토큰")
-                            .font(.headline)
-                        SecureField("pk. 로 시작", text: $store.mapboxToken)
-                            .textFieldStyle(.roundedBorder)
-                        Text("맵박스 계정에서 토큰을 만든 뒤 붙여 넣습니다. 지도 스타일을 읽을 수 있어야 합니다.")
-                            .font(.caption)
-                            .foregroundStyle(FieldColor.muted)
-                    }
-                }
-                FieldCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("인공지능 암호")
-                            .font(.headline)
-                        SecureField("제미나이 암호", text: $store.geminiKey)
-                            .textFieldStyle(.roundedBorder)
-                        Text("구글 AI 스튜디오에서 발급한 암호입니다. 없어도 수온·물때·채비 계산은 그대로 나옵니다. 있으면 그 계산을 오늘 순서로 다듬습니다.")
-                            .font(.caption)
-                            .foregroundStyle(FieldColor.muted)
-                    }
-                }
-                FieldCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("조석예보 인증키")
-                            .font(.headline)
-                        SecureField("국립해양조사원 인증키", text: $store.dataGoKrKey)
-                            .textFieldStyle(.roundedBorder)
-                        Text("이 칸 하나를 조석예보와 바다해도(해어름)가 같이 씁니다. 국립해양조사원 인증키를 그대로 붙여 넣으세요. 인코딩하지 마세요. 비워 두면 들물·날물은 바다 예보 모델만 보여 주고, 바다해도 탭은 키를 넣으라고 안내합니다. 그 모델은 조석이 연결된 것이 아닙니다. 해어름은 맵박스 위에 겹치지 않습니다. 어장 경고는 키 없이도 앱 안의 공개 파일을 봅니다.")
-                            .font(.caption)
-                            .foregroundStyle(FieldColor.muted)
-                    }
-                }
-                HStack {
-                    Button("암호 저장") { store.saveSecrets() }
-                        .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
-                    Button("비밀 파일 불러오기") { importing = true }
-                        .buttonStyle(FieldButton(fill: FieldColor.card2))
-                }
                 FieldCard {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("연결")
@@ -203,10 +162,5 @@ struct SettingsView: View {
         }
         .background(FieldColor.ink)
         .foregroundStyle(FieldColor.paper)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text]) { result in
-            if case .success(let url) = result {
-                store.importSecrets(from: url)
-            }
-        }
     }
 }
