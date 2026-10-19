@@ -31,11 +31,11 @@ struct AppShell: View {
                         .tabItem { Label("설정", systemImage: "gearshape") }
                         .tag(5)
                 }
-                .onChange(of: phoneTab) { _, newValue in
+                .onChange(of: phoneTab) { newValue in
                     if newValue == 2 { PublicFishingBoard.shared.refreshIfNeeded() }
                 }
             } else {
-                NavigationSplitView {
+                NavigationView {
                     List {
                         NavigationLink { MapScreen() } label: { Label("지도", systemImage: "map") }
                         NavigationLink { ChartScreen() } label: { Label("바다해도", systemImage: "water.waves") }
@@ -45,10 +45,10 @@ struct AppShell: View {
                         NavigationLink { SettingsView() } label: { Label("설정", systemImage: "gearshape") }
                     }
                     .navigationTitle("바로낚시")
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 210)
-                } detail: {
+                    .frame(minWidth: 180, idealWidth: 210)
                     MapScreen()
                 }
+                .navigationViewStyle(DoubleColumnNavigationViewStyle())
             }
         }
         .sheet(isPresented: Binding(
@@ -61,7 +61,7 @@ struct AppShell: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) { phase in
             if phase == .active { PublicFishingBoard.shared.refreshIfNeeded() }
         }
     }
@@ -80,7 +80,9 @@ struct BaroNaksiApp: App {
                     PublicFishingBoard.shared.refreshIfNeeded()
                 }
         }
+        #if os(macOS)
         .defaultSize(width: 1200, height: 820)
+        #endif
         .commands {
             CommandGroup(after: .newItem) {
                 Button("이 지역 다시 분석") { store.refresh() }

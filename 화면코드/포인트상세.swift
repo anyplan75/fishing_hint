@@ -230,7 +230,7 @@ struct PointEditSheet: View {
     @State private var tempText = ""
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             Form {
                 TextField("이름", text: $point.name)
                 Picker("자리", selection: $point.place) {
@@ -266,5 +266,6 @@ struct PointEditSheet: View {
                 if let temp = point.measuredTempC { tempText = String(format: "%.1f", temp) }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
