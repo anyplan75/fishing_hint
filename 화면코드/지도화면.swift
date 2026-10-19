@@ -123,9 +123,6 @@ struct MapScreen: View {
                 .font(.caption2)
                 .foregroundStyle(FieldColor.muted)
                 .lineLimit(1)
-            linkRow("지도", store.mapLink)
-            linkRow("인공지능", store.aiLink)
-            linkRow("조석", store.tideLink)
             Text(store.statusText)
                 .font(.caption)
                 .foregroundStyle(FieldColor.paper)
@@ -135,24 +132,6 @@ struct MapScreen: View {
         .padding(.vertical, 8)
         .background(FieldColor.ink)
         .foregroundStyle(FieldColor.paper)
-    }
-
-    private func linkRow(_ title: String, _ link: LinkLine) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.caption)
-                Text(link.word)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(link.connected ? FieldColor.good : FieldColor.bad)
-            }
-            if !link.connected {
-                Text(link.reason)
-                    .font(.caption2)
-                    .foregroundStyle(FieldColor.muted)
-                    .lineLimit(1)
-            }
-        }
     }
 
     private var list: some View {

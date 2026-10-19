@@ -80,9 +80,9 @@ final class AppStore: ObservableObject {
     @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 주간과 야간을 고른 뒤 갯가와 수중을 나눠 보여 줍니다."
     @Published var recommendBusy = false
     @Published var selectedPickId: String?
-    @Published var mapLink = LinkLine.absent("암호 없음")
-    @Published var aiLink = LinkLine.absent("암호 없음")
-    @Published var tideLink = LinkLine.absent("인증키 없음")
+    @Published var mapLink = LinkLine.absent("지도 없음. 설정에 맵박스 암호가 없습니다.")
+    @Published var aiLink = LinkLine.absent("인공지능 없음. 설정에 제미나이 암호가 없습니다.")
+    @Published var tideLink = LinkLine.absent("조석 없음. 설정에 국립해양조사원 인증키가 없습니다.")
 
     private let locator = LocationFixer()
     private var cache: [String: ConditionPack] = [:]
@@ -649,13 +649,13 @@ final class AppStore: ObservableObject {
         guard generation == recommendGen else { return }
         let key = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            aiLink = .absent("암호 없음")
+            aiLink = .absent("인공지능 없음. 설정에 제미나이 암호가 없습니다.")
             return
         }
         guard !picks.isEmpty else { return }
         let blocks = picks.prefix(12).map { (id: $0.id, text: $0.factScript) }
         guard let rewritten = try? await BriefingClient.polishFacts(blocks, apiKey: key) else {
-            aiLink = .absent("호출 실패")
+            aiLink = .absent("인공지능 없음. 호출이 실패했습니다.")
             return
         }
         guard generation == recommendGen else { return }
@@ -703,7 +703,7 @@ final class AppStore: ObservableObject {
         guard generation == refreshGen else { return }
         briefings = next
         if geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            aiLink = .absent("암호 없음")
+            aiLink = .absent("인공지능 없음. 설정에 제미나이 암호가 없습니다.")
         }
         if let selectedPointId, next[selectedPointId] != nil {
             await polish(id: selectedPointId, generation: generation)
@@ -723,11 +723,11 @@ final class AppStore: ObservableObject {
     private func rewriteBrief(_ script: String) async -> String? {
         let key = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            aiLink = .absent("암호 없음")
+            aiLink = .absent("인공지능 없음. 설정에 제미나이 암호가 없습니다.")
             return nil
         }
         guard let text = try? await BriefingClient.rewrite(script: script, apiKey: key) else {
-            aiLink = .absent("호출 실패")
+            aiLink = .absent("인공지능 없음. 호출이 실패했습니다.")
             return nil
         }
         aiLink = .connected
@@ -737,18 +737,18 @@ final class AppStore: ObservableObject {
     func noteMap(ok: Bool) {
         let key = mapboxToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            mapLink = .absent("암호 없음")
+            mapLink = .absent("지도 없음. 설정에 맵박스 암호가 없습니다.")
             return
         }
-        mapLink = ok ? .connected : .absent("호출 실패")
+        mapLink = ok ? .connected : .absent("지도 없음. 호출이 실패했습니다.")
     }
 
     private func noteMapbox(_ reach: GeocodeReach) {
         switch reach {
         case .noKey:
-            mapLink = .absent("암호 없음")
+            mapLink = .absent("지도 없음. 설정에 맵박스 암호가 없습니다.")
         case .failed:
-            mapLink = .absent("호출 실패")
+            mapLink = .absent("지도 없음. 호출이 실패했습니다.")
         case .ok:
             mapLink = .connected
         }
@@ -771,22 +771,24 @@ final class AppStore: ObservableObject {
     private func noteTideReport(_ report: TideReport) {
         let key = dataGoKrKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            tideLink = .absent("인증키 없음")
+            tideLink = .absent("조석 없음. 설정에 국립해양조사원 인증키가 없습니다.")
             return
         }
-        tideLink = report.samples.isEmpty ? .absent("호출 실패") : .connected
+        tideLink = report.samples.isEmpty
+            ? .absent("조석 없음. 국립해양조사원 호출이 실패했습니다.")
+            : .connected
     }
 
     private func resetLinksForKeys() {
-        mapLink = linkForKey(mapboxToken, emptyReason: "암호 없음", current: mapLink)
-        aiLink = linkForKey(geminiKey, emptyReason: "암호 없음", current: aiLink)
-        tideLink = linkForKey(dataGoKrKey, emptyReason: "인증키 없음", current: tideLink)
+        mapLink = linkForKey(mapboxToken, emptyReason: "지도 없음. 설정에 맵박스 암호가 없습니다.", waiting: "지도 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: mapLink)
+        aiLink = linkForKey(geminiKey, emptyReason: "인공지능 없음. 설정에 제미나이 암호가 없습니다.", waiting: "인공지능 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: aiLink)
+        tideLink = linkForKey(dataGoKrKey, emptyReason: "조석 없음. 설정에 국립해양조사원 인증키가 없습니다.", waiting: "조석 없음. 인증키는 있으나 아직 호출하지 않았습니다.", current: tideLink)
     }
 
-    private func linkForKey(_ raw: String, emptyReason: String, current: LinkLine) -> LinkLine {
+    private func linkForKey(_ raw: String, emptyReason: String, waiting: String, current: LinkLine) -> LinkLine {
         if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .absent(emptyReason) }
         if current.connected { return current }
-        if current.reason == emptyReason || current.reason.isEmpty { return .absent("아직 호출하지 않음") }
+        if current.reason == emptyReason || current.reason.isEmpty { return .absent(waiting) }
         return current
     }
 

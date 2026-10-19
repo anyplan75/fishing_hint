@@ -156,6 +156,16 @@ struct SettingsView: View {
                     Button("비밀 파일 불러오기") { importing = true }
                         .buttonStyle(FieldButton(fill: FieldColor.card2))
                 }
+                FieldCard {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("연결")
+                            .font(.headline)
+                        Text(store.mapLink.connected ? "지도 연결됨" : store.mapLink.reason)
+                        Text(store.aiLink.connected ? "인공지능 연결됨" : store.aiLink.reason)
+                        Text(store.tideLink.connected ? "조석 연결됨" : store.tideLink.reason)
+                    }
+                    .font(.subheadline)
+                }
 
                 Text("노리는 고기")
                     .font(.headline)
