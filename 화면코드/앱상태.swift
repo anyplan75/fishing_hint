@@ -61,7 +61,10 @@ final class AppStore: ObservableObject {
     /// 이름을 적어 내 포인트로 저장할 자리입니다. 비우면 저장하지 않습니다.
     @Published var savePrompt: SavePrompt?
     @Published var briefings: [String: PointBriefing] = [:]
+    /// 자리를 열었는데 물때·수온을 못 받으면 계산 중 대신 이 짧은 이유를 보여 줍니다.
+    @Published var detailMiss: [String: String] = [:]
     @Published var selectedPointId: String?
+    private var briefGen: [String: Int] = [:]
     @Published var centerLat = 37.45
     @Published var centerLon = 126.59
     @Published var userLat: Double?
@@ -358,10 +361,28 @@ final class AppStore: ObservableObject {
             return
         }
         let point = myPoints.first { $0.id == id } ?? (tapped?.id == id ? tapped : nil)
-        guard let point else { return }
+        guard let point else {
+            detailMiss[id] = "이 자리를 찾지 못했습니다."
+            return
+        }
+        fillBriefing(for: point)
+    }
+
+    /// 저장한 자리의 물때와 수온을 받아 화면에 올립니다. 못 받으면 계산 중을 끝냅니다.
+    private func fillBriefing(for point: FishingPoint) {
+        let generation = (briefGen[point.id] ?? 0) + 1
+        briefGen[point.id] = generation
+        detailMiss[point.id] = nil
         Task {
-            guard let pack = try? await cachedConditions(latitude: point.latitude, longitude: point.longitude) else {
-                statusText = "이 포인트의 날씨를 가져오지 못했습니다."
+            let outcome = await self.packWithinLimit(latitude: point.latitude, longitude: point.longitude)
+            guard self.briefGen[point.id] == generation else { return }
+            guard let pack = outcome.pack else {
+                guard self.briefings[point.id] == nil else { return }
+                self.detailMiss[point.id] = outcome.reason
+                return
+            }
+            guard !pack.hours.isEmpty else {
+                self.detailMiss[point.id] = "물때와 수온을 가져오지 못했습니다."
                 return
             }
             let moon = MoonClock.info(on: Date(), longitude: point.longitude)
@@ -369,13 +390,42 @@ final class AppStore: ObservableObject {
                 point: point,
                 conditions: pack,
                 moon: moon,
-                preferred: preferSpecies,
-                distanceKm: distance(from: point)
+                preferred: self.preferSpecies,
+                distanceKm: self.distance(from: point)
             )
-            if let text = await rewriteBrief(briefing.script) {
+            self.briefings[point.id] = briefing
+            self.detailMiss[point.id] = nil
+            if let text = await self.rewriteBrief(briefing.script) {
+                guard self.briefGen[point.id] == generation else { return }
                 briefing.aiScript = text
+                self.briefings[point.id] = briefing
             }
-            briefings[point.id] = briefing
+        }
+    }
+
+    private func packWithinLimit(latitude: Double, longitude: Double) async -> (pack: ConditionPack?, reason: String) {
+        await withTaskGroup(of: (ConditionPack?, String).self) { group in
+            group.addTask {
+                do {
+                    return (try await self.cachedConditions(latitude: latitude, longitude: longitude), "")
+                } catch {
+                    return (nil, "물때와 수온을 가져오지 못했습니다.")
+                }
+            }
+            group.addTask {
+                do {
+                    try await Task.sleep(nanoseconds: 32_000_000_000)
+                } catch {
+                    return (nil, "")
+                }
+                return (nil, "물때와 수온을 시간 안에 받지 못했습니다.")
+            }
+            let first = await group.next() ?? (nil, "물때와 수온을 가져오지 못했습니다.")
+            group.cancelAll()
+            if first.0 == nil, first.1.isEmpty {
+                return (nil, "물때와 수온을 가져오지 못했습니다.")
+            }
+            return first
         }
     }
 
@@ -391,11 +441,16 @@ final class AppStore: ObservableObject {
             briefing.point = copy
             briefings.removeValue(forKey: point.id)
             briefings[copy.id] = briefing
+            detailMiss[copy.id] = nil
         }
+        detailMiss.removeValue(forKey: point.id)
         selectedPointId = copy.id
         if tapped?.id == point.id { tapped = copy }
         saveDisk()
         refreshSavedPlans()
+        if briefings[copy.id] == nil {
+            fillBriefing(for: copy)
+        }
     }
 
     func updateMine(_ point: FishingPoint) {
@@ -410,27 +465,15 @@ final class AppStore: ObservableObject {
         myPoints[index] = named
         saveDisk()
         statusText = "\(named.name) 을 내 포인트에 저장했습니다."
-        Task {
-            guard let pack = try? await cachedConditions(latitude: named.latitude, longitude: named.longitude) else { return }
-            let moon = MoonClock.info(on: Date(), longitude: named.longitude)
-            var briefing = FishingAnalyst.brief(
-                point: named,
-                conditions: pack,
-                moon: moon,
-                preferred: preferSpecies,
-                distanceKm: distance(from: named)
-            )
-            if let text = await rewriteBrief(briefing.script) {
-                briefing.aiScript = text
-            }
-            briefings[named.id] = briefing
-        }
+        fillBriefing(for: named)
         refreshSavedPlans()
     }
 
     func deleteMine(_ point: FishingPoint) {
         myPoints.removeAll { $0.id == point.id }
         briefings.removeValue(forKey: point.id)
+        detailMiss.removeValue(forKey: point.id)
+        briefGen.removeValue(forKey: point.id)
         if selectedPointId == point.id { selectedPointId = nil }
         if tapped?.id == point.id { tapped = nil }
         savedTimes.removeValue(forKey: point.id)
@@ -1019,7 +1062,12 @@ final class AppStore: ObservableObject {
             )
         }
         guard generation == refreshGen else { return }
-        briefings = next
+        var merged = next
+        for (id, existing) in briefings where merged[id] == nil {
+            let kept = myPoints.contains(where: { $0.id == id }) || id == selectedPointId
+            if kept { merged[id] = existing }
+        }
+        briefings = merged
         if geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             aiLink = .absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
         }

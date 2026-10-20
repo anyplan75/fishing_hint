@@ -12,6 +12,8 @@ struct PointDetailView: View {
     var body: some View {
         if let briefing = store.briefings[pointId] {
             detail(briefing)
+        } else if let reason = store.detailMiss[pointId] {
+            missed(reason)
         } else {
             VStack(spacing: 12) {
                 ProgressView()
@@ -21,6 +23,20 @@ struct PointDetailView: View {
             .background(FieldColor.ink)
             .foregroundStyle(FieldColor.paper)
         }
+    }
+
+    private func missed(_ reason: String) -> some View {
+        VStack(spacing: 16) {
+            Text(reason)
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+            Button("닫기") { store.selectedPointId = nil }
+                .buttonStyle(FieldButton(fill: FieldColor.card2))
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(FieldColor.ink)
+        .foregroundStyle(FieldColor.paper)
     }
 
     private func detail(_ briefing: PointBriefing) -> some View {
