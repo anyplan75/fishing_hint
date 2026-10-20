@@ -16,6 +16,41 @@ enum PlaceNameClient {
         var longitude: Double
     }
 
+    /// 동네 이름과 그 위 시·도 이름을 함께 모읍니다. 동네 이름만으로는 제주 글을 거르지 못합니다.
+    static func areaLabels(latitude: Double, longitude: Double, token: String) async -> [String] {
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return [] }
+        guard let url = url("https://api.mapbox.com/search/geocode/v6/reverse", [
+            "longitude": "\(longitude)",
+            "latitude": "\(latitude)",
+            "language": "ko",
+            "types": "neighborhood,locality,place,region",
+            "access_token": token,
+        ]) else { return [] }
+        guard let (data, response) = try? await URLSession.shared.data(from: url),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let features = object["features"] as? [[String: Any]] else { return [] }
+        var names: [String] = []
+        func add(_ raw: Any?) {
+            guard let text = raw as? String else { return }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 2, !names.contains(trimmed) else { return }
+            names.append(trimmed)
+        }
+        for feature in features {
+            let properties = feature["properties"] as? [String: Any] ?? [:]
+            add(properties["name"])
+            add(properties["place_formatted"])
+            if let context = properties["context"] as? [String: Any] {
+                for item in context.values {
+                    add((item as? [String: Any])?["name"])
+                }
+            }
+        }
+        return names
+    }
+
     static func reverse(latitude: Double, longitude: Double, token: String) async -> (name: String?, reach: GeocodeReach) {
         let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { return (nil, .noKey) }

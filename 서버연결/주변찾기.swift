@@ -43,7 +43,7 @@ enum NearbyFinder {
     private static func once(url: URL, query: String, latitude: Double, longitude: Double) async throws -> [FishingPoint] {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 30
+        request.timeoutInterval = 45
         request.setValue("바로낚시/0.1", forHTTPHeaderField: "User-Agent")
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         var allowed = CharacterSet.alphanumerics

@@ -77,8 +77,8 @@ final class AppStore: ObservableObject {
     @Published var nowPicks: [SpotPick] = []
     @Published var shorePicks: [SpotPick] = []
     @Published var skinPicks: [SpotPick] = []
-    @Published var planMessage = "날짜와 갈 수 있는 시간만 고르면, 그 안에서 좋은 시간을 찾아 최대 10곳을 줄 세웁니다."
-    @Published var nowMessage = "지금 위치에서 6시간 안의 좋은 시간을 찾아 최대 3곳을 줄 세웁니다."
+    @Published var planMessage = "기준점 일대의 공개 글을 읽어, 위치를 정한 자리만 최대 10곳 줄 세웁니다."
+    @Published var nowMessage = "현재 위치 일대의 공개 글을 읽어, 지금부터 6시간 안에서 최대 3곳을 줄 세웁니다."
     @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 주간과 야간을 고른 뒤 갯가와 수중을 나눠 보여 줍니다."
     @Published var recommendBusy = false
     @Published var selectedPickId: String?
@@ -498,7 +498,7 @@ final class AppStore: ObservableObject {
 
     func recommendPlan(on day: Date, startHour: Int, endHour: Int, scope: RecommendScope) {
         let span = RecommendEngine.window(on: day, startHour: startHour, endHour: endHour)
-        beginRecommend(scope: scope, requireUser: false, from: span.start, to: span.end, slot: .plan) { context, generation in
+        beginRecommend(scope: scope, requireUser: false, from: span.start, to: span.end, slot: .plan, mentions: true) { context, generation in
             let outcome = RecommendEngine.fishing(
                 points: context.points,
                 from: context.from,
@@ -508,7 +508,9 @@ final class AppStore: ObservableObject {
                 tide: context.tide,
                 areaTitle: context.title,
                 kind: .plan,
-                lookedAround: context.lookedAround
+                lookedAround: context.lookedAround,
+                intro: context.intro,
+                keepDangerous: true
             )
             guard generation == self.recommendGen else { return }
             self.planPicks = outcome.picks
@@ -521,7 +523,7 @@ final class AppStore: ObservableObject {
     func recommendNow() {
         let start = Date()
         let end = start.addingTimeInterval(RecommendEngine.nowSpan)
-        beginRecommend(scope: .here, requireUser: true, from: start, to: end, slot: .now) { context, generation in
+        beginRecommend(scope: .here, requireUser: true, from: start, to: end, slot: .now, mentions: true) { context, generation in
             let outcome = RecommendEngine.fishing(
                 points: context.points,
                 from: context.from,
@@ -531,7 +533,9 @@ final class AppStore: ObservableObject {
                 tide: context.tide,
                 areaTitle: context.title,
                 kind: .now,
-                lookedAround: context.lookedAround
+                lookedAround: context.lookedAround,
+                intro: context.intro,
+                keepDangerous: true
             )
             guard generation == self.recommendGen else { return }
             self.nowPicks = outcome.picks
@@ -571,7 +575,18 @@ final class AppStore: ObservableObject {
         var from: Date
         var to: Date
         var lookedAround: Bool
+        var intro: String
     }
+
+    private struct MentionMemory {
+        var signature: String
+        var at: Date
+        var points: [FishingPoint]
+        var intro: String
+        var title: String
+    }
+
+    private var mentionMemory: MentionMemory?
 
     private enum RecommendMessageSlot {
         case plan
@@ -585,14 +600,20 @@ final class AppStore: ObservableObject {
         from: Date,
         to: Date,
         slot: RecommendMessageSlot,
+        mentions: Bool = false,
         work: @escaping (RecommendContext, Int) async -> Void
     ) {
         recommendGen += 1
         let generation = recommendGen
         recommendBusy = true
-        writeRecommendMessage("주변 자리와 물때, 수온을 계산하는 중", slot: slot)
+        let waiting = mentions
+            ? "기준점 일대의 공개 글과 공개 포인트를 읽는 중"
+            : "주변 자리와 물때, 수온을 계산하는 중"
+        writeRecommendMessage(waiting, slot: slot)
         Task {
-            let loaded = await self.loadRecommendContext(scope: scope, requireUser: requireUser, from: from, to: to)
+            let loaded = mentions
+                ? await self.loadMentionedContext(scope: scope, requireUser: requireUser, from: from, to: to)
+                : await self.loadRecommendContext(scope: scope, requireUser: requireUser, from: from, to: to)
             guard generation == self.recommendGen else { return }
             switch loaded {
             case .failure(let error):
@@ -662,7 +683,101 @@ final class AppStore: ObservableObject {
             apiKey: dataGoKrKey
         )
         noteTideReport(tide)
-        return .success(RecommendContext(points: prepared, tide: tide, title: center.title, from: from, to: to, lookedAround: pool.lookedAround))
+        return .success(RecommendContext(points: prepared, tide: tide, title: center.title, from: from, to: to, lookedAround: pool.lookedAround, intro: ""))
+    }
+
+    /// 낚시 계획과 바로가자만 씁니다. 미리 등록된 목록을 그대로 줄 세우지 않습니다.
+    private func loadMentionedContext(
+        scope: RecommendScope,
+        requireUser: Bool,
+        from: Date,
+        to: Date
+    ) async -> Result<RecommendContext, RecommendMessageError> {
+        guard let center = recommendCenter(scope: scope, requireUser: requireUser) else {
+            if requireUser || scope == .here {
+                return .failure(RecommendMessageError(message: "현재 위치가 없습니다. 위치 권한을 허용해 주세요."))
+            }
+            return .failure(RecommendMessageError(message: "저장된 지역이 없습니다. 지도에서 지역을 맞춘 뒤 이 지역 저장을 누르세요."))
+        }
+        let signature = String(format: "%.3f,%.3f,%.0f", center.lat, center.lon, center.radius)
+        let remembered = mentionMemory
+        let located: [FishingPoint]
+        let intro: String
+        let title: String
+        if let remembered, remembered.signature == signature, Date().timeIntervalSince(remembered.at) < 600, !remembered.points.isEmpty {
+            located = remembered.points
+            intro = remembered.intro
+            title = remembered.title
+        } else {
+            async let noteCall = PublicFishingClient.load()
+            async let pointCall = NearbyFinder.search(latitude: center.lat, longitude: center.lon, radiusKm: center.radius)
+            async let nameCall = PlaceNameClient.areaLabels(latitude: center.lat, longitude: center.lon, token: mapboxToken)
+            let bundle = await noteCall
+            let found = (try? await pointCall) ?? []
+            let labels = await nameCall
+            let anchorName = labels.first { PublicNearby.canFilter($0) } ?? labels.first ?? center.title
+            let notes = PublicNearby.keep(bundle.notes, anchor: labels.joined(separator: " "))
+            let known = found.compactMap { point -> MentionFinder.KnownPoint? in
+                let away = Geo.kilometers(center.lat, center.lon, point.latitude, point.longitude)
+                guard away <= center.radius + 0.3 else { return nil }
+                return MentionFinder.KnownPoint(point: point, distanceKm: away)
+            }
+            let outcome = await MentionFinder.find(
+                anchorName: anchorName,
+                latitude: center.lat,
+                longitude: center.lon,
+                radiusKm: center.radius,
+                notes: notes,
+                known: known,
+                mapboxToken: mapboxToken,
+                geminiKey: geminiKey
+            )
+            guard !outcome.points.isEmpty, let ready = outcome.failure == nil ? outcome.intro : nil else {
+                let reason = outcome.failure ?? "추천할 자리를 정하지 못했습니다. 없는 자리는 만들지 않았습니다."
+                return .failure(RecommendMessageError(message: reason))
+            }
+            located = outcome.points
+            intro = ready
+            title = anchorName
+            mentionMemory = MentionMemory(signature: signature, at: Date(), points: located, intro: intro, title: title)
+        }
+        guard let pack = try? await cachedConditions(latitude: center.lat, longitude: center.lon) else {
+            return .failure(RecommendMessageError(message: "날씨와 바다 정보를 가져오지 못했습니다. 인터넷을 확인한 뒤 다시 누르세요."))
+        }
+        var prepared: [RecommendEngine.PreparedPoint] = []
+        for point in located {
+            let away = Geo.kilometers(center.lat, center.lon, point.latitude, point.longitude)
+            let pointPack: ConditionPack
+            if away > 12 {
+                pointPack = (try? await cachedConditions(latitude: point.latitude, longitude: point.longitude)) ?? pack
+            } else {
+                pointPack = pack
+            }
+            let travel = travelDistance(to: point, centerLat: center.lat, centerLon: center.lon)
+            prepared.append(RecommendEngine.PreparedPoint(
+                point: point,
+                pack: pointPack,
+                distanceKm: travel.km,
+                distanceFromUser: travel.fromUser
+            ))
+        }
+        let tide = await PublicTideClient.forecast(
+            latitude: center.lat,
+            longitude: center.lon,
+            from: from,
+            to: to,
+            apiKey: dataGoKrKey
+        )
+        noteTideReport(tide)
+        return .success(RecommendContext(
+            points: prepared,
+            tide: tide,
+            title: title,
+            from: from,
+            to: to,
+            lookedAround: true,
+            intro: intro
+        ))
     }
 
     private func recommendCenter(scope: RecommendScope, requireUser: Bool) -> (lat: Double, lon: Double, radius: Double, title: String)? {

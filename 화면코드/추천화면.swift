@@ -65,7 +65,7 @@ struct RecommendScreen: View {
 
     private var planPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("갈 수 있는 날짜와 시간만 고르세요. 주간·야간은 고르지 않습니다. 그 시간 안에서 각 자리의 좋은 시각을 찾아 최대 10곳을 줄 세웁니다.")
+            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 그 일대 공개 글과 공개 포인트를 읽고, 위치를 정한 자리만 받은 날씨·물때로 최대 10곳을 줄 세웁니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             DatePicker("날짜", selection: $day, displayedComponents: .date)
@@ -84,7 +84,7 @@ struct RecommendScreen: View {
                 .font(.caption)
                 .foregroundStyle(FieldColor.muted)
             if store.planPicks.isEmpty {
-                Text("아직 추천이 없습니다. 위 버튼을 누르면 이 반경 안에서만 찾습니다.")
+                Text("추천 자리가 없으면 위 문장에 이유를 적습니다. 위치를 못 정한 글은 넣지 않습니다.")
                     .font(.subheadline)
             }
             ForEach(store.planPicks) { pick in
@@ -96,7 +96,7 @@ struct RecommendScreen: View {
 
     private var nowPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("지금 짬이 날 때 쓰는 화면입니다. 시각은 지금부터 6시간, 위치는 현재 위치입니다. 각 자리에서 그 안의 좋은 시간을 찾아 최대 3곳을 줄 세웁니다.")
+            Text("기준은 현재 위치 한 점입니다. 그 일대 공개 글과 공개 포인트를 읽고, 위치를 정한 자리만 지금부터 6시간의 받은 날씨·물때로 최대 3곳을 줄 세웁니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             Button(store.recommendBusy ? "계산 중" : "지금 3곳 찾기") { store.recommendNow() }
@@ -105,7 +105,7 @@ struct RecommendScreen: View {
             Text(store.nowMessage)
                 .font(.caption)
                 .foregroundStyle(FieldColor.muted)
-                .lineLimit(store.nowPicks.isEmpty ? 2 : nil)
+                .lineLimit(store.nowPicks.isEmpty ? 4 : nil)
             ForEach(store.nowPicks) { pick in
                 Button { store.selectedPickId = pick.id } label: { PickRow(pick: pick) }
                     .buttonStyle(.plain)
@@ -232,7 +232,7 @@ struct PickRow: View {
             HStack {
                 Text(FieldFormat.distance(pick.distanceKm))
                 Text(FieldFormat.money(pick.costWon))
-                Text(pick.point.place.title)
+                Text(pick.point.source == "공개글" ? "공개 글에서 확인" : pick.point.place.title)
             }
             .font(.caption)
             .foregroundStyle(FieldColor.muted)

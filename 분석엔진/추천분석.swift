@@ -73,9 +73,13 @@ enum RecommendEngine {
         tide: TideReport,
         areaTitle: String,
         kind: RecommendKind,
-        lookedAround: Bool = true
+        lookedAround: Bool = true,
+        intro: String = "",
+        keepDangerous: Bool = false
     ) -> FishingOutcome {
-        let scopeNote = scopeSentence(areaTitle: areaTitle, count: points.count, fewerThan: limit, lookedAround: lookedAround)
+        let scopeNote = intro.isEmpty
+            ? scopeSentence(areaTitle: areaTitle, count: points.count, fewerThan: limit, lookedAround: lookedAround)
+            : intro
         guard !points.isEmpty else {
             if !lookedAround {
                 return FishingOutcome(picks: [], message: "주변 공개 자리를 가져오지 못했습니다. \(areaTitle) 안의 저장 자리와 찍은 자리가 없습니다. 없는 자리는 만들지 않았습니다.")
@@ -102,11 +106,14 @@ enum RecommendEngine {
                 to: to
             )
             let safe = hours.filter { !$0.dangerous }
-            guard let best = safe.max(by: { $0.score < $1.score }) else {
+            let pool = safe.isEmpty && keepDangerous ? hours : safe
+            guard let best = pool.max(by: { $0.score < $1.score }) else {
                 if !hours.isEmpty { dangerSkipped += 1 }
                 continue
             }
+            if safe.isEmpty { dangerSkipped += 1 }
             let atTime = MoonClock.info(on: best.time, longitude: item.point.longitude)
+            let caution = best.dangerous ? "이 시각은 바람·파도·천둥 때문에 나가기 어렵습니다. 받은 상태는 그대로 보여 줍니다." : nil
             ranked.append(makePick(
                 item: item,
                 best: best,
@@ -114,10 +121,17 @@ enum RecommendEngine {
                 tide: tide,
                 kind: kind,
                 night: nil,
-                lowNote: nil
+                lowNote: caution
             ))
         }
-        ranked.sort(by: better)
+        ranked.sort { left, right in
+            if keepDangerous {
+                let leftBad = left.whyLines.contains { $0.contains("나가기 어렵습니다") }
+                let rightBad = right.whyLines.contains { $0.contains("나가기 어렵습니다") }
+                if leftBad != rightBad { return !leftBad }
+            }
+            return better(left, right)
+        }
         let shown = Array(ranked.prefix(limit))
         return FishingOutcome(
             picks: shown,
@@ -374,6 +388,10 @@ enum RecommendEngine {
             place += " 내가 저장한 자리."
         } else if point.source == "찍은자리" {
             place += " 지도에서 찍은 자리."
+        } else if point.source == "공개글" {
+            place += " 공개 글에 나온 지명을 지도에서 확인한 자리."
+        } else if point.source == "공개포인트" {
+            place += " 공개 포인트 정보에 있던 자리."
         } else {
             place += " 공개 지도에서 찾은 자리."
         }

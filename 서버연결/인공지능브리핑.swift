@@ -19,6 +19,41 @@ enum BriefingClient {
         throw lastError
     }
 
+    /// 공개 글과 공개 포인트 목록만 보고, 괜찮은 자리의 이름과 위치 단서를 고릅니다.
+    /// 좌표는 받지 않습니다. 위치는 목록의 번호이거나, 자료에 적힌 지명입니다.
+    static func readMentions(script: String, apiKey: String) async throws -> [MentionDraft] {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !script.isEmpty else { throw BriefingError.missingKey }
+        let instruction = """
+        너는 기준점 일대의 공개 자료만 읽는다.
+        낚시 글로 괜찮은 포인트가 언급되거나, 공개 포인트 정보가 낚시 자리로 보이면 그것만 고른다.
+        자료에 없는 장소, 좌표, 어종, 조황, 날씨, 물때는 만들지 마라.
+        위도, 경도, 숫자의 좌표는 절대 쓰지 마라.
+        위치를 자료 안에서 못 정하면 그 항목은 빼라.
+        글에 나온 지명을 우선 고르고, 공개 포인트 목록에 같은 곳이 있으면 그 번호를 써라.
+        최대 10개만 써라.
+        각 항목은 아래 형식만 써라.
+        SPOT
+        이름: (자료에 있는 이름)
+        근거: (자료에 있는 짧은 구절)
+        위치종류: POINT 또는 PLACE
+        위치값: POINT면 목록의 P번호만. PLACE면 자료 문장에 그대로 있는 지명만.
+        END
+        """
+        let models = ["gemini-3.8-flash", "gemini-2.5-flash"]
+        var lastError: Error = BriefingError.empty
+        for model in models {
+            do {
+                let text = try await callRaw(model: model, script: script, instruction: instruction, apiKey: key, maxTokens: 2200)
+                let parsed = parseMentions(text)
+                if !parsed.isEmpty { return parsed }
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
     /// 이미 계산된 사실만 받아 추천 이유 문장을 다듬습니다. 순위와 숫자는 바꾸지 않습니다.
     static func polishFacts(_ blocks: [(id: String, text: String)], apiKey: String) async throws -> [String: String] {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -111,6 +146,63 @@ enum BriefingClient {
         commit()
         return result
     }
+
+    private static func parseMentions(_ text: String) -> [MentionDraft] {
+        var drafts: [MentionDraft] = []
+        for rawBlock in text.components(separatedBy: "SPOT").dropFirst() {
+            let body = rawBlock.components(separatedBy: "END").first ?? rawBlock
+            var name = ""
+            var basis = ""
+            var kind = ""
+            var value = ""
+            for raw in body.split(separator: "\n", omittingEmptySubsequences: false) {
+                let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "*", with: "")
+                if line.hasPrefix("이름:") {
+                    name = cleaned(line, prefix: "이름:")
+                } else if line.hasPrefix("근거:") {
+                    basis = cleaned(line, prefix: "근거:")
+                } else if line.hasPrefix("위치종류:") {
+                    kind = cleaned(line, prefix: "위치종류:")
+                } else if line.hasPrefix("위치값:") {
+                    value = cleaned(line, prefix: "위치값:")
+                } else if line.hasPrefix("위치:") {
+                    let rest = cleaned(line, prefix: "위치:")
+                    if rest.hasPrefix("POINT") {
+                        kind = "POINT"
+                        value = rest.replacingOccurrences(of: "POINT", with: "").trimmingCharacters(in: .whitespaces)
+                    } else if rest.hasPrefix("PLACE") {
+                        kind = "PLACE"
+                        value = rest.replacingOccurrences(of: "PLACE", with: "").trimmingCharacters(in: .whitespaces)
+                    }
+                }
+            }
+            let draft = MentionDraft(name: name, basis: basis, kind: kind, value: value)
+            if draft.usable { drafts.append(draft) }
+            if drafts.count >= 10 { break }
+        }
+        return drafts
+    }
+
+    private static func cleaned(_ line: String, prefix: String) -> String {
+        line.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct MentionDraft {
+    var name: String
+    var basis: String
+    var kind: String
+    var value: String
+
+    var usable: Bool {
+        let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard token.count >= 1 else { return false }
+        let upper = kind.uppercased()
+        return upper.contains("POINT") || upper.contains("PLACE")
+    }
+
+    var isPoint: Bool { kind.uppercased().contains("POINT") }
 }
 
 enum BriefingError: LocalizedError {
