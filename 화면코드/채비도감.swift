@@ -148,6 +148,9 @@ struct SettingsView: View {
                         Text(store.aiLink.connected ? "인공지능 연결됨" : store.aiLink.reason)
                         Text(store.tideLink.connected ? "조석 연결됨" : store.tideLink.reason)
                         Text(store.youtubeLink.connected ? "유튜브 연결됨" : store.youtubeLink.reason)
+                        Text(store.fishingIndexLink.connected ? "바다낚시지수 연결됨" : store.fishingIndexLink.reason)
+                        Text(store.fishingSpotLink.connected ? "전국낚시터 연결됨" : store.fishingSpotLink.reason)
+                        Text(store.scubaLink.connected ? "스킨스쿠버지수 연결됨" : store.scubaLink.reason)
                     }
                     .font(.subheadline)
                 }

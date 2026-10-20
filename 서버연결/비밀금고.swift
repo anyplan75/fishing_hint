@@ -11,6 +11,8 @@ struct SecretPair {
     var haereum: String
     /// 유튜브 공개 영상 검색만 읽는 키입니다.
     var youtube: String
+    /// 바다낚시지수 조회만 읽는 키입니다. 조석예보 키와 다릅니다.
+    var fishingIndex: String
 }
 
 enum SecretVault {
@@ -20,7 +22,8 @@ enum SecretVault {
             gemini: BakedSecrets.gemini,
             dataGoKr: BakedSecrets.dataGoKr,
             haereum: BakedSecrets.khoaHaereum,
-            youtube: BakedSecrets.youtube
+            youtube: BakedSecrets.youtube,
+            fishingIndex: BakedSecrets.fishingIndex
         )
     }
 }

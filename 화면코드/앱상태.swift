@@ -75,19 +75,24 @@ final class AppStore: ObservableObject {
     @Published var haereumKey = ""
     /// 유튜브 공개 영상 검색만 씁니다. 로그인이나 비공개 영상은 보지 않습니다.
     @Published var youtubeKey = ""
+    /// 바다낚시지수 조회만 씁니다. 조석예보 키와 다릅니다.
+    @Published var fishingIndexKey = ""
     @Published var planPicks: [SpotPick] = []
     @Published var nowPicks: [SpotPick] = []
     @Published var shorePicks: [SpotPick] = []
     @Published var skinPicks: [SpotPick] = []
-    @Published var planMessage = "기준점 일대의 공개 글과 유튜브 공개 영상을 읽어, 위치를 정한 자리만 최대 10곳 줄 세웁니다."
-    @Published var nowMessage = "현재 위치 일대의 공개 글과 유튜브 공개 영상을 읽어, 지금부터 6시간 안에서 최대 3곳을 줄 세웁니다."
-    @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 주간과 야간을 고른 뒤 갯가와 수중을 나눠 보여 줍니다."
+    @Published var planMessage = "기준점 일대의 공개 글, 유튜브, 바다낚시지수, 전국낚시터를 읽어 최대 10곳을 줄 세웁니다."
+    @Published var nowMessage = "현재 위치 일대의 공개 글, 유튜브, 바다낚시지수, 전국낚시터를 읽어 최대 3곳을 줄 세웁니다."
+    @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 수중은 스킨스쿠버지수 포인트만 봅니다."
     @Published var recommendBusy = false
     @Published var selectedPickId: String?
     @Published var mapLink = LinkLine.absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
     @Published var aiLink = LinkLine.absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
     @Published var tideLink = LinkLine.absent("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
     @Published var youtubeLink = LinkLine.absent("유튜브 없음. 비밀 파일에 YOUTUBE_API_KEY 가 없습니다.")
+    @Published var fishingIndexLink = LinkLine.absent("바다낚시지수 없음. 비밀 파일에 DATA_GO_KR_FISHING_INDEX_KEY 가 없습니다.")
+    @Published var fishingSpotLink = LinkLine.absent("전국낚시터 없음. 아직 표준데이터를 부르지 않았습니다.")
+    @Published var scubaLink = LinkLine.absent("스킨스쿠버지수 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
     @Published var savedTimes: [String: SavedSpotTimes] = [:]
     @Published var savedTimesNote = "저장한 자리의 낚시 시간과 해루질 시간을 받은 예보로 계산합니다."
 
@@ -115,6 +120,7 @@ final class AppStore: ObservableObject {
         dataGoKrKey = secrets.dataGoKr
         haereumKey = secrets.haereum
         youtubeKey = secrets.youtube
+        fishingIndexKey = secrets.fishingIndex
         locator.onFix = { [weak self] coordinate in
             self?.applyFix(coordinate)
         }
@@ -554,6 +560,37 @@ final class AppStore: ObservableObject {
         let start = calendar.startOfDay(for: day)
         let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
         beginRecommend(scope: scope, requireUser: false, from: start, to: end, slot: .glean) { context, generation in
+            var skinPrepared: [RecommendEngine.PreparedPoint] = []
+            var skinNote = "스킨스쿠버지수 없음. 기준점을 확인하지 못했습니다."
+            if let center = self.recommendCenter(scope: scope, requireUser: false) {
+                let skin = await SkinScubaClient.load(
+                    latitude: center.lat,
+                    longitude: center.lon,
+                    radiusKm: center.radius,
+                    apiKey: self.dataGoKrKey,
+                    night: night
+                )
+                self.noteScuba(skin)
+                skinNote = skin.note
+                if let pack = try? await self.cachedConditions(latitude: center.lat, longitude: center.lon) {
+                    for place in skin.places {
+                        OfficialNotes.rows[place.point.id] = place.hours.map {
+                            OfficialIndexRow(day: "", half: $0.half, species: "", line: $0.line, rank: $0.rank)
+                        }
+                        let away = Geo.kilometers(center.lat, center.lon, place.point.latitude, place.point.longitude)
+                        let pointPack = away > 12
+                            ? ((try? await self.cachedConditions(latitude: place.point.latitude, longitude: place.point.longitude)) ?? pack)
+                            : pack
+                        let travel = self.travelDistance(to: place.point, centerLat: center.lat, centerLon: center.lon)
+                        skinPrepared.append(RecommendEngine.PreparedPoint(
+                            point: place.point,
+                            pack: pointPack,
+                            distanceKm: travel.km,
+                            distanceFromUser: travel.fromUser
+                        ))
+                    }
+                }
+            }
             let outcome = RecommendEngine.gleaning(
                 points: context.points,
                 from: context.from,
@@ -561,7 +598,9 @@ final class AppStore: ObservableObject {
                 night: night,
                 tide: context.tide,
                 areaTitle: context.title,
-                lookedAround: context.lookedAround
+                lookedAround: context.lookedAround,
+                skinOverride: skinPrepared,
+                skinNote: skinNote
             )
             guard generation == self.recommendGen else { return }
             self.shorePicks = outcome.shore
@@ -611,8 +650,8 @@ final class AppStore: ObservableObject {
         let generation = recommendGen
         recommendBusy = true
         let waiting = mentions
-            ? "기준점 일대의 공개 글과 유튜브 공개 영상을 읽는 중"
-            : "주변 자리와 물때, 수온을 계산하는 중"
+            ? "공개 글, 유튜브, 바다낚시지수, 전국낚시터를 읽는 중"
+            : "주변 자리, 스킨스쿠버지수, 물때, 수온을 계산하는 중"
         writeRecommendMessage(waiting, slot: slot)
         Task {
             let loaded = mentions
@@ -714,38 +753,61 @@ final class AppStore: ObservableObject {
             title = remembered.title
         } else {
             async let noteCall = PublicFishingClient.load()
-            async let pointCall = NearbyFinder.search(latitude: center.lat, longitude: center.lon, radiusKm: center.radius)
             async let nameCall = PlaceNameClient.areaLabels(latitude: center.lat, longitude: center.lon, token: mapboxToken)
             let bundle = await noteCall
-            let found = (try? await pointCall) ?? []
             let labels = await nameCall
             let anchorName = labels.first { PublicNearby.canFilter($0) } ?? labels.first ?? center.title
             let notes = PublicNearby.keep(bundle.notes, anchor: labels.joined(separator: " "))
             let region = labels.filter { PublicNearby.canFilter($0) }.min { $0.count < $1.count } ?? anchorName
             let videos = await YouTubePublicClient.search(region: region, apiKey: youtubeKey)
             noteYouTube(fetched: !videos.isEmpty)
-            let known = found.compactMap { point -> MentionFinder.KnownPoint? in
-                let away = Geo.kilometers(center.lat, center.lon, point.latitude, point.longitude)
-                guard away <= center.radius + 0.3 else { return nil }
-                return MentionFinder.KnownPoint(point: point, distanceKm: away)
-            }
             let reading = Array(notes.prefix(16)) + videos
+            OfficialNotes.reset()
+            async let indexCall = SeaFishingIndexClient.load(
+                latitude: center.lat,
+                longitude: center.lon,
+                radiusKm: center.radius,
+                apiKey: fishingIndexKey
+            )
+            async let spotCall = FishingSpotStandardClient.load(
+                latitude: center.lat,
+                longitude: center.lon,
+                radiusKm: center.radius
+            )
             let outcome = await MentionFinder.find(
                 anchorName: anchorName,
                 latitude: center.lat,
                 longitude: center.lon,
                 radiusKm: center.radius,
                 notes: reading,
-                known: known,
+                known: [],
                 mapboxToken: mapboxToken,
                 geminiKey: geminiKey
             )
-            guard !outcome.points.isEmpty, let ready = outcome.failure == nil ? outcome.intro : nil else {
-                let reason = outcome.failure ?? "추천할 자리를 정하지 못했습니다. 없는 자리는 만들지 않았습니다."
-                return .failure(RecommendMessageError(message: reason))
+            let index = await indexCall
+            let spots = await spotCall
+            noteFishingIndex(index)
+            noteFishingSpots(spots)
+            if !index.connected {
+                OfficialNotes.blocked = index.note
             }
-            located = outcome.points
-            intro = ready
+            var merged = outcome.points + index.points + spots.points
+            var kept: [FishingPoint] = []
+            for point in merged {
+                if kept.contains(where: { Geo.kilometers($0.latitude, $0.longitude, point.latitude, point.longitude) < 0.4 && $0.name == point.name }) {
+                    continue
+                }
+                kept.append(point)
+            }
+            SeaFishingIndexClient.attach(to: kept, anchors: index.points)
+            guard !kept.isEmpty else {
+                var reason = [outcome.failure, index.note, spots.note].compactMap { $0 }.filter { !$0.isEmpty }
+                if reason.isEmpty { reason = ["추천할 자리를 정하지 못했습니다. 없는 자리는 만들지 않았습니다."] }
+                return .failure(RecommendMessageError(message: reason.joined(separator: " ")))
+            }
+            located = kept
+            var lines = [outcome.points.isEmpty ? (outcome.failure ?? "") : outcome.intro, index.note, spots.note]
+            intro = lines.filter { !$0.isEmpty }.joined(separator: " ")
             title = anchorName
             mentionMemory = MentionMemory(signature: signature, at: Date(), points: located, intro: intro, title: title)
         }
@@ -983,6 +1045,20 @@ final class AppStore: ObservableObject {
         aiLink = linkForKey(geminiKey, emptyReason: "인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.", waiting: "인공지능 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: aiLink)
         tideLink = linkForKey(dataGoKrKey, emptyReason: "조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.", waiting: "조석 없음. 인증키는 있으나 아직 호출하지 않았습니다.", current: tideLink)
         youtubeLink = linkForKey(youtubeKey, emptyReason: "유튜브 없음. 비밀 파일에 YOUTUBE_API_KEY 가 없습니다.", waiting: "유튜브 없음. 키는 있으나 아직 호출하지 않았습니다.", current: youtubeLink)
+        fishingIndexLink = linkForKey(fishingIndexKey, emptyReason: "바다낚시지수 없음. 비밀 파일에 DATA_GO_KR_FISHING_INDEX_KEY 가 없습니다.", waiting: "바다낚시지수 없음. 키는 있으나 아직 호출하지 않았습니다.", current: fishingIndexLink)
+        scubaLink = linkForKey(dataGoKrKey, emptyReason: "스킨스쿠버지수 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.", waiting: "스킨스쿠버지수 없음. 키는 있으나 아직 호출하지 않았습니다.", current: scubaLink)
+    }
+
+    private func noteFishingIndex(_ load: SeaFishingIndexClient.Load) {
+        fishingIndexLink = load.connected ? .connected : .absent(load.note)
+    }
+
+    private func noteFishingSpots(_ load: FishingSpotStandardClient.Load) {
+        fishingSpotLink = load.connected ? .connected : .absent(load.note)
+    }
+
+    private func noteScuba(_ load: SkinScubaClient.Load) {
+        scubaLink = load.connected ? .connected : .absent(load.note)
     }
 
     private func noteYouTube(fetched: Bool) {

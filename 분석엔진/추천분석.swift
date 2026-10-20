@@ -132,7 +132,16 @@ enum RecommendEngine {
             }
             return better(left, right)
         }
-        let shown = Array(ranked.prefix(limit))
+        var shown = Array(ranked.prefix(limit))
+        let official: Set<String> = ["바다낚시지수", "낚시터표준"]
+        if !shown.contains(where: { official.contains($0.point.source) }),
+           let kept = ranked.first(where: { official.contains($0.point.source) }) {
+            if shown.count < limit {
+                shown.append(kept)
+            } else if !shown.isEmpty {
+                shown[shown.count - 1] = kept
+            }
+        }
         return FishingOutcome(
             picks: shown,
             message: fishingMessage(scopeNote: scopeNote, shown: shown.count, limit: limit, candidates: points.count, dangerSkipped: dangerSkipped, tide: tide)
@@ -146,23 +155,45 @@ enum RecommendEngine {
         night: Bool,
         tide: TideReport,
         areaTitle: String,
-        lookedAround: Bool = true
+        lookedAround: Bool = true,
+        skinOverride: [PreparedPoint]? = nil,
+        skinNote: String = ""
     ) -> GleanOutcome {
         let coastal = points.filter { coastalPlace($0) }
         let scopeNote = scopeSentence(areaTitle: areaTitle, count: points.count, fewerThan: nil, lookedAround: lookedAround)
-        guard !points.isEmpty else {
+        if points.isEmpty, skinOverride == nil {
             if !lookedAround {
                 return GleanOutcome(shore: [], skin: [], message: "주변 공개 자리를 가져오지 못했습니다. \(areaTitle) 안의 저장 자리와 찍은 자리가 없습니다. 없는 자리는 만들지 않았습니다.")
             }
             return GleanOutcome(shore: [], skin: [], message: scopeNote + " 이 반경에서 모은 자리가 없습니다.")
         }
+        if points.isEmpty, let skinOverride {
+            let skin = overlaps(skinOverride, from: from, to: to)
+                ? scubaPicks(items: skinOverride, from: from, to: to, night: night, tide: tide)
+                : SpeciesBundle(picks: [], misses: "", sawDanger: false)
+            var lines = [skinNote]
+            if skinOverride.isEmpty {
+                lines.append("수중은 스킨스쿠버지수에 있는 포인트만 봅니다. 이 반경에서 읽은 포인트가 없습니다.")
+            }
+            if !lookedAround {
+                lines.append("주변 공개 자리를 가져오지 못했습니다. 갯가 자리는 만들지 않았습니다.")
+            }
+            return GleanOutcome(shore: [], skin: skin.picks, message: lines.filter { !$0.isEmpty }.joined(separator: " "))
+        }
         guard overlaps(points, from: from, to: to) else {
             return GleanOutcome(shore: [], skin: [], message: scopeNote + " 고른 날짜의 예보가 없습니다. 예보는 오늘과 내일만 가져옵니다.")
         }
         let shorePlaces = coastal.filter { shorePlace($0.point.place) }
-        let skinPlaces = coastal.filter { skinPlace($0.point.place) }
         let shore = speciesPicks(items: shorePlaces, species: shoreSpecies, from: from, to: to, night: night, tide: tide, kind: .shore)
-        let skin = speciesPicks(items: skinPlaces, species: skinSpecies, from: from, to: to, night: night, tide: tide, kind: .skin)
+        let skinPlaces: [PreparedPoint]
+        let skin: SpeciesBundle
+        if let skinOverride {
+            skinPlaces = skinOverride
+            skin = scubaPicks(items: skinOverride, from: from, to: to, night: night, tide: tide)
+        } else {
+            skinPlaces = coastal.filter { skinPlace($0.point.place) }
+            skin = speciesPicks(items: skinPlaces, species: skinSpecies, from: from, to: to, night: night, tide: tide, kind: .skin)
+        }
         var lines = [scopeNote]
         let when = night ? "야간 해루질" : "주간 해루질"
         lines.append("\(when)입니다. 갯가와 수중 스킨을 따로 줄 세웠습니다.")
@@ -172,8 +203,13 @@ enum RecommendEngine {
         } else if !shore.misses.isEmpty {
             lines.append("갯가에서 맞는 시간이 없는 생물: \(shore.misses).")
         }
+        if !skinNote.isEmpty { lines.append(skinNote) }
         if skinPlaces.isEmpty {
-            lines.append("이 반경에는 수중(갯바위·백사장·방파제·찍은 자리)으로 볼 자리가 없습니다.")
+            if skinOverride != nil {
+                lines.append("수중은 스킨스쿠버지수에 있는 포인트만 봅니다. 이 반경에서 읽은 포인트가 없습니다.")
+            } else {
+                lines.append("이 반경에는 수중(갯바위·백사장·방파제·찍은 자리)으로 볼 자리가 없습니다.")
+            }
         } else if !skin.misses.isEmpty {
             lines.append("수중에서 맞는 시간이 없는 생물: \(skin.misses).")
         }
@@ -258,6 +294,64 @@ enum RecommendEngine {
         return SpeciesBundle(picks: picks, misses: misses.joined(separator: ", "), sawDanger: sawDanger)
     }
 
+    private static func scubaPicks(
+        items: [PreparedPoint],
+        from: Date,
+        to: Date,
+        night: Bool,
+        tide: TideReport
+    ) -> SpeciesBundle {
+        var picks: [SpotPick] = []
+        var missed = 0
+        for item in items {
+            let rows = OfficialNotes.rows[item.point.id] ?? []
+            let wanted = rows.max { $0.rank < $1.rank }
+            let moon = MoonClock.info(on: from, longitude: item.point.longitude)
+            let hours = FishingAnalyst.hourJudgements(
+                point: item.point,
+                conditions: item.pack,
+                moon: moon,
+                preferred: [],
+                speciesAllow: nil,
+                from: from,
+                to: to
+            ).filter { !$0.dangerous && FishingAnalyst.isNightHour($0.time, pack: item.pack) == night }
+            guard let open = hours.max(by: { $0.score < $1.score }) else {
+                missed += 1
+                continue
+            }
+            let matched = hours.filter { half(of: $0.time) == wanted?.half }
+            let chosenHour = matched.max(by: { $0.score < $1.score }) ?? open
+            var note = wanted?.line ?? "스킨스쿠버지수에 이 시각의 여건 문장이 없습니다."
+            if let wanted, !wanted.half.isEmpty, half(of: chosenHour.time) == wanted.half, abs(chosenHour.time.timeIntervalSince(open.time)) > 30 * 60 {
+                note += " 스킨스쿠버지수가 \(wanted.half)이라 받은 예보 안에서 시각을 그쪽으로 바꿨습니다."
+            }
+            let judgement = HourJudgement(
+                time: chosenHour.time,
+                score: chosenHour.score,
+                species: "스킨스쿠버",
+                reasons: [note],
+                dangerous: false
+            )
+            let atTime = MoonClock.info(on: chosenHour.time, longitude: item.point.longitude)
+            picks.append(makePick(
+                item: item,
+                best: judgement,
+                moon: atTime,
+                tide: tide,
+                kind: .skin,
+                night: night,
+                lowNote: nil
+            ))
+        }
+        let miss = missed > 0 ? "조건이 맞는 시간이 없는 포인트 \(missed)곳" : ""
+        return SpeciesBundle(picks: picks, misses: miss, sawDanger: false)
+    }
+
+    private static func half(of date: Date) -> String {
+        Calendar.current.component(.hour, from: date) < 12 ? "오전" : "오후"
+    }
+
     private static func makePick(
         item: PreparedPoint,
         best: HourJudgement,
@@ -271,12 +365,19 @@ enum RecommendEngine {
         let publicNote = PublicGroundNote.make(latitude: item.point.latitude, longitude: item.point.longitude)
         let facts = spotFacts(point: item.point, hour: hour, moon: moon, fromUser: item.distanceFromUser)
         var why = measurementLines(hour: hour, moon: moon)
-        why.append(contentsOf: best.reasons.map { "조건표: \($0)" })
+        if item.point.source == "스킨스쿠버" {
+            why.append(contentsOf: best.reasons)
+        } else {
+            why.append(contentsOf: best.reasons.map { "조건표: \($0)" })
+        }
+        if let indexLine = OfficialNotes.sentence(pointId: item.point.id, species: best.species, when: best.time) {
+            why.append(indexLine)
+        }
         if let lowNote { why.append(lowNote) }
         if let official = officialTideLine(at: best.time, tide: tide) { why.append(official) }
         why.append(tide.note)
         var risks = conditionRisks(hour: hour, usedSea: item.pack.usedSea)
-        if kind == .shore || kind == .skin {
+        if item.point.source != "스킨스쿠버", (kind == .shore || kind == .skin) {
             risks.append(contentsOf: gleanRisks(night: night == true, skin: kind == .skin))
         }
         let reasonCore = best.reasons.prefix(2).joined(separator: ", ")
@@ -394,6 +495,12 @@ enum RecommendEngine {
             place += " 유튜브 공개 영상의 제목이나 설명에 나온 지명을 지도에서 확인한 자리."
         } else if point.source == "공개포인트" {
             place += " 공개 포인트 정보에 있던 자리."
+        } else if point.source == "바다낚시지수" {
+            place += " 국립해양조사원 바다낚시지수 갯바위 지점."
+        } else if point.source == "낚시터표준" {
+            place += " 전국낚시터정보표준데이터의 유료 낚시터 또는 선상 시설."
+        } else if point.source == "스킨스쿠버" {
+            place += " 국립해양조사원 스킨스쿠버지수 포인트."
         } else {
             place += " 공개 지도에서 찾은 자리."
         }

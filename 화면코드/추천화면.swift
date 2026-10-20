@@ -65,7 +65,7 @@ struct RecommendScreen: View {
 
     private var planPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 그 일대 공개 글, 지역 이름으로 찾은 유튜브 공개 영상, 공개 포인트를 읽고, 위치를 정한 자리만 받은 날씨·물때로 최대 10곳을 줄 세웁니다.")
+            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 그 일대 공개 글, 지역 이름으로 찾은 유튜브 공개 영상, 바다낚시지수 갯바위, 전국낚시터의 유료·선상만 읽습니다. 기준점 반경 안에서 위치를 정한 자리만, 받은 날씨·물때와 바다낚시지수 여건으로 최대 10곳을 줄 세웁니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             DatePicker("날짜", selection: $day, displayedComponents: .date)
@@ -96,7 +96,7 @@ struct RecommendScreen: View {
 
     private var nowPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 현재 위치 한 점입니다. 그 일대 공개 글, 지역 이름으로 찾은 유튜브 공개 영상, 공개 포인트를 읽고, 위치를 정한 자리만 지금부터 6시간의 받은 날씨·물때로 최대 3곳을 줄 세웁니다.")
+            Text("기준은 현재 위치 한 점입니다. 그 일대 공개 글, 지역 이름으로 찾은 유튜브 공개 영상, 바다낚시지수 갯바위, 전국낚시터의 유료·선상만 읽습니다. 기준점 반경 안에서 위치를 정한 자리만, 지금부터 6시간의 받은 날씨·물때와 바다낚시지수 여건으로 최대 3곳을 줄 세웁니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             Button(store.recommendBusy ? "계산 중" : "지금 3곳 찾기") { store.recommendNow() }
@@ -115,7 +115,7 @@ struct RecommendScreen: View {
 
     private var gleanPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("해루질은 낚시 추천과 따로입니다. 주간 해루질과 야간 해루질만 고르세요. 갯가와 수중 스킨을 둘 다 보여 줍니다.")
+            Text("해루질은 낚시 추천과 따로입니다. 주간 해루질과 야간 해루질만 고르세요. 갯가는 주변 공개 자리이고, 수중 스킨은 스킨스쿠버지수에 있는 포인트만 보여 줍니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             Picker("해루질 시간", selection: $gleanNight) {
@@ -134,7 +134,7 @@ struct RecommendScreen: View {
                 .font(.caption)
                 .foregroundStyle(FieldColor.muted)
             gleanSection("갯가 해루질", picks: store.shorePicks, empty: "갯가 추천이 없습니다. 간조 전후와 조건표가 맞는 자리만 나옵니다.")
-            gleanSection("수중 스킨해루질", picks: store.skinPicks, empty: "수중 추천이 없습니다. 맨몸 잠수이며, 파도와 바람이 센 시간은 빼 둡니다.")
+            gleanSection("수중 스킨해루질", picks: store.skinPicks, empty: "수중 추천이 없습니다. 스킨스쿠버지수에서 읽은 포인트만 나옵니다. 키가 거절되면 위 문장에 짧은 이유만 적습니다.")
         }
     }
 
@@ -217,6 +217,9 @@ struct PickRow: View {
         switch pick.point.source {
         case "공개글": return "공개 글에서 확인"
         case "유튜브": return "유튜브에서 확인"
+        case "바다낚시지수": return "바다낚시지수"
+        case "낚시터표준": return "전국낚시터"
+        case "스킨스쿠버": return "스킨스쿠버지수"
         default: return pick.point.place.title
         }
     }
