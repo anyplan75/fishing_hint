@@ -17,8 +17,7 @@ struct MapScreen: View {
                     Spacer(minLength: 0)
                         .allowsHitTesting(false)
                     if infoOpen {
-                        infoCard
-                            .frame(maxHeight: geo.size.height * 0.46)
+                        infoCard(height: min(geo.size.height * 0.56, 460))
                     }
                 }
                 .padding(.horizontal, 10)
@@ -165,24 +164,92 @@ struct MapScreen: View {
         .foregroundStyle(FieldColor.paper)
     }
 
-    private var infoCard: some View {
+    /// 분석이 카드 맨 위에 바로 보입니다. 목록이 길면 이 카드 안에서만 올립니다.
+    private func infoCard(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(placeTitle)
                     .font(.headline)
                     .foregroundStyle(FieldColor.paper)
-                    .lineLimit(2)
+                    .lineLimit(1)
                 Spacer(minLength: 8)
                 Button("닫기") { infoOpen = false }
                     .buttonStyle(FieldButton(fill: FieldColor.card2))
             }
-            Text("검색 결과")
+            Text("분석")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(FieldColor.good)
+            analysisPane
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            Text(store.routeNote.isEmpty ? "경로 없음" : store.routeNote)
+                .font(.caption)
+                .foregroundStyle(FieldColor.paper)
+                .lineLimit(1)
+            searchRow
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: height)
+        .background(FieldColor.ink.opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(FieldColor.line, lineWidth: 1))
+        .foregroundStyle(FieldColor.paper)
+    }
+
+    private var analysisPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if store.ranked.isEmpty {
+                    Text(store.busy ? "이 지역을 계산하는 중" : "분석 없음. 분석 버튼으로 이 지역을 계산합니다.")
+                        .font(.subheadline)
+                        .foregroundStyle(FieldColor.paper)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(FieldColor.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                } else {
+                    ForEach(store.ranked) { briefing in
+                        Button { store.select(briefing.point.id) } label: {
+                            PointRankCard(briefing: briefing)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack(spacing: 8) {
+                    Text("반경 \(Int(store.radiusKm))km")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(FieldColor.good)
+                        .lineLimit(1)
+                    Slider(value: $store.radiusKm, in: 3...30, step: 1, onEditingChanged: { editing in
+                        if !editing { store.refresh() }
+                    })
+                }
+                HStack {
+                    Button("길 안내") { store.guideChosen() }
+                        .buttonStyle(FieldButton(fill: FieldColor.sea))
+                    Button("저장 지역") { store.useSavedRegion() }
+                        .buttonStyle(FieldButton(fill: FieldColor.card2))
+                    Button("이 지역 저장") { store.saveCurrentRegion() }
+                        .buttonStyle(FieldButton(fill: FieldColor.card2))
+                    Spacer(minLength: 0)
+                }
+                if !store.roadNote.isEmpty {
+                    Text(store.roadNote)
+                        .font(.caption2)
+                        .foregroundStyle(FieldColor.muted)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private var searchRow: some View {
+        Group {
             if store.searchHits.isEmpty {
                 Text("검색 결과 없음")
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
+                    .lineLimit(1)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -195,62 +262,9 @@ struct MapScreen: View {
                         }
                     }
                 }
-            }
-            Text(store.routeNote.isEmpty ? "경로 없음" : store.routeNote)
-                .font(.caption)
-                .foregroundStyle(FieldColor.paper)
-                .lineLimit(2)
-            if !store.roadNote.isEmpty {
-                Text(store.roadNote)
-                    .font(.caption2)
-                    .foregroundStyle(FieldColor.muted)
-                    .lineLimit(1)
-            }
-            HStack(spacing: 8) {
-                Text("반경 \(Int(store.radiusKm))km")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(FieldColor.good)
-                    .lineLimit(1)
-                Slider(value: $store.radiusKm, in: 3...30, step: 1, onEditingChanged: { editing in
-                    if !editing { store.refresh() }
-                })
-            }
-            HStack {
-                Button("길 안내") { store.guideChosen() }
-                    .buttonStyle(FieldButton(fill: FieldColor.sea))
-                Button("저장 지역") { store.useSavedRegion() }
-                    .buttonStyle(FieldButton(fill: FieldColor.card2))
-                Button("이 지역 저장") { store.saveCurrentRegion() }
-                    .buttonStyle(FieldButton(fill: FieldColor.card2))
-                Spacer(minLength: 0)
-            }
-            Text("분석")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(FieldColor.good)
-            if store.ranked.isEmpty {
-                Text(store.busy ? "이 지역을 계산하는 중" : "분석 없음. 분석 버튼으로 이 지역을 계산합니다.")
-                    .font(.caption)
-                    .foregroundStyle(FieldColor.muted)
-                    .lineLimit(2)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(store.ranked) { briefing in
-                            Button { store.select(briefing.point.id) } label: {
-                                PointRankCard(briefing: briefing)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
+                .frame(height: 36)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(FieldColor.ink.opacity(0.96))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(FieldColor.line, lineWidth: 1))
-        .foregroundStyle(FieldColor.paper)
     }
 }
 
