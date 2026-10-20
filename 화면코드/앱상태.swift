@@ -373,6 +373,33 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// 핀을 누르면 상세 화면은 열지 않습니다. 이름과 길만 고르고, 상세는 분석 카드를 누를 때 엽니다.
+    func inspect(_ id: String) {
+        if id.hasPrefix("search-") {
+            openSearch(id)
+            return
+        }
+        if tapped?.id == id, tapped?.source == "찍은자리", briefings[id] == nil {
+            askSaveName(for: tapped!)
+            guide(to: PlaceNameClient.Hit(id: tapped!.id, name: tapped!.name, latitude: tapped!.latitude, longitude: tapped!.longitude))
+            return
+        }
+        if let briefing = briefings[id] {
+            regionTitle = briefing.point.name
+            guide(to: PlaceNameClient.Hit(
+                id: briefing.point.id,
+                name: briefing.point.name,
+                latitude: briefing.point.latitude,
+                longitude: briefing.point.longitude
+            ))
+            return
+        }
+        let point = myPoints.first { $0.id == id } ?? (tapped?.id == id ? tapped : nil)
+        guard let point else { return }
+        regionTitle = point.name
+        guide(to: PlaceNameClient.Hit(id: point.id, name: point.name, latitude: point.latitude, longitude: point.longitude))
+    }
+
     func openSearch(_ pinId: String) {
         let key = pinId.hasPrefix("search-") ? String(pinId.dropFirst("search-".count)) : pinId
         guard let hit = searchHits.first(where: { $0.id == key }) else { return }
@@ -1261,9 +1288,14 @@ final class AppStore: ObservableObject {
             tideLink = .absent("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
             return
         }
-        tideLink = report.samples.isEmpty
-            ? .absent("조석 없음. 국립해양조사원 호출이 실패했습니다.")
-            : .connected
+        if report.samples.isEmpty {
+            let reason = report.note.contains("인증키가 이 자료를 거절")
+                ? "조석 없음. 인증키가 이 자료를 거절했습니다."
+                : (report.note.isEmpty ? "조석 없음. 국립해양조사원 호출이 실패했습니다." : report.note)
+            tideLink = .absent(reason)
+        } else {
+            tideLink = .connected
+        }
     }
 
     private func resetLinksForKeys() {

@@ -1,32 +1,29 @@
 import SwiftUI
 
-// 지도와 점수 순 목록입니다. 내 주변, 저장한 지역, 찍은 자리를 여기서 고릅니다.
+// 지도가 화면의 대부분입니다. 장소 이름, 검색 결과, 경로 문구, 분석은 자리를 눌렀을 때만 나옵니다.
 
 struct MapScreen: View {
     @EnvironmentObject private var store: AppStore
     @State private var query = ""
+    @State private var infoOpen = false
 
     var body: some View {
         GeometryReader { geo in
-            if geo.size.width > 860 {
-                HStack(spacing: 0) {
-                    mapLayer.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    VStack(spacing: 0) {
-                        controls
-                        if !store.ranked.isEmpty {
-                            list
-                        }
-                    }
-                    .frame(width: 380)
-                }
-            } else {
-                VStack(spacing: 0) {
-                    mapLayer.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    controls
-                    if !store.ranked.isEmpty {
-                        list.frame(maxHeight: min(260, geo.size.height * 0.28))
+            ZStack(alignment: .top) {
+                mapLayer
+                    .frame(width: geo.size.width, height: geo.size.height)
+                VStack(spacing: 8) {
+                    searchBar
+                    Spacer(minLength: 0)
+                        .allowsHitTesting(false)
+                    if infoOpen {
+                        infoCard
+                            .frame(maxHeight: geo.size.height * 0.46)
                     }
                 }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
             }
         }
         .background(FieldColor.ink)
@@ -51,13 +48,13 @@ struct MapScreen: View {
                     fitToken: store.mapFit,
                     route: store.routeLine,
                     pins: pins,
-                    onTap: { lat, lon in store.dropSpot(latitude: lat, longitude: lon) },
+                    onTap: { lat, lon in
+                        infoOpen = true
+                        store.dropSpot(latitude: lat, longitude: lon)
+                    },
                     onSelect: { id in
-                        if id.hasPrefix("search-") {
-                            store.openSearch(id)
-                        } else {
-                            store.select(id)
-                        }
+                        infoOpen = true
+                        store.inspect(id)
                     },
                     onMove: { lat, lon in store.rememberMap(latitude: lat, longitude: lon) },
                     onMap: { store.noteMap(ok: $0) }
@@ -125,8 +122,21 @@ struct MapScreen: View {
         return items
     }
 
-    private var controls: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private var placeTitle: String {
+        if store.savePrompt != nil, let tapped = store.tapped, !tapped.name.isEmpty {
+            return tapped.name
+        }
+        if let destination = store.destination, !destination.title.isEmpty {
+            return destination.title
+        }
+        if !store.regionTitle.isEmpty {
+            return store.regionTitle
+        }
+        return "고른 자리"
+    }
+
+    private var searchBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 TextField("지역, 식당, 숙소 검색", text: $query)
                     .textFieldStyle(.plain)
@@ -136,22 +146,63 @@ struct MapScreen: View {
                     .onSubmit { store.searchPlaces(query) }
                 Button("찾기") { store.searchPlaces(query) }
                     .buttonStyle(FieldButton(fill: FieldColor.sea))
-            }
-            if !store.searchHits.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(store.searchHits) { hit in
-                        Button(hit.title) { store.openSearch(hit.id); query = hit.title }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                            .foregroundStyle(FieldColor.paper)
-                    }
-                }
-                .background(FieldColor.card)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                Button(store.busy ? "계산 중" : "분석") { store.refresh() }
+                    .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
+                    .disabled(store.busy)
+                Button("내 위치") { store.focusOnMe() }
+                    .buttonStyle(FieldButton(fill: FieldColor.card2))
             }
             if store.mapboxToken.isEmpty {
                 Text("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
+                    .font(.caption2)
+                    .foregroundStyle(FieldColor.muted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(8)
+        .background(FieldColor.ink.opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .foregroundStyle(FieldColor.paper)
+    }
+
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(placeTitle)
+                    .font(.headline)
+                    .foregroundStyle(FieldColor.paper)
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                Button("닫기") { infoOpen = false }
+                    .buttonStyle(FieldButton(fill: FieldColor.card2))
+            }
+            Text("검색 결과")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(FieldColor.good)
+            if store.searchHits.isEmpty {
+                Text("검색 결과 없음")
                     .font(.caption)
+                    .foregroundStyle(FieldColor.muted)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(store.searchHits) { hit in
+                            Button(hit.title) {
+                                store.openSearch(hit.id)
+                                query = hit.title
+                            }
+                            .buttonStyle(FieldButton(fill: FieldColor.card))
+                        }
+                    }
+                }
+            }
+            Text(store.routeNote.isEmpty ? "경로 없음" : store.routeNote)
+                .font(.caption)
+                .foregroundStyle(FieldColor.paper)
+                .lineLimit(2)
+            if !store.roadNote.isEmpty {
+                Text(store.roadNote)
+                    .font(.caption2)
                     .foregroundStyle(FieldColor.muted)
                     .lineLimit(1)
             }
@@ -163,75 +214,42 @@ struct MapScreen: View {
                 Slider(value: $store.radiusKm, in: 3...30, step: 1, onEditingChanged: { editing in
                     if !editing { store.refresh() }
                 })
-                Button(store.busy ? "계산 중" : "이 지역 분석") { store.refresh() }
-                    .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
-                    .disabled(store.busy)
             }
             HStack {
-                Button("내 위치") { store.focusOnMe() }
-                    .buttonStyle(FieldButton(fill: FieldColor.card2))
+                Button("길 안내") { store.guideChosen() }
+                    .buttonStyle(FieldButton(fill: FieldColor.sea))
                 Button("저장 지역") { store.useSavedRegion() }
                     .buttonStyle(FieldButton(fill: FieldColor.card2))
                 Button("이 지역 저장") { store.saveCurrentRegion() }
                     .buttonStyle(FieldButton(fill: FieldColor.card2))
                 Spacer(minLength: 0)
             }
-            HStack {
-                Button("길 안내") { store.guideChosen() }
-                    .buttonStyle(FieldButton(fill: FieldColor.sea))
-                Spacer(minLength: 0)
-            }
-            Text("\(store.useMyLocation ? "내 주변" : store.regionTitle) · \(store.locationText)")
-                .font(.caption2)
-                .foregroundStyle(FieldColor.muted)
-                .lineLimit(1)
-            if !store.roadNote.isEmpty {
-                Text(store.roadNote)
-                    .font(.caption2)
-                    .foregroundStyle(FieldColor.muted)
-                    .lineLimit(1)
-            }
-            if !store.routeNote.isEmpty {
-                Text(store.routeNote)
+            Text("분석")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(FieldColor.good)
+            if store.ranked.isEmpty {
+                Text(store.busy ? "이 지역을 계산하는 중" : "분석 없음. 분석 버튼으로 이 지역을 계산합니다.")
                     .font(.caption)
-                    .foregroundStyle(FieldColor.paper)
+                    .foregroundStyle(FieldColor.muted)
                     .lineLimit(2)
-            }
-            Text(store.statusText)
-                .font(.caption)
-                .foregroundStyle(FieldColor.paper)
-                .lineLimit(2)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(FieldColor.ink)
-        .foregroundStyle(FieldColor.paper)
-    }
-
-    private var list: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(store.regionTitle)
-                    .font(.headline)
-                Spacer()
-                if store.busy { ProgressView().controlSize(.small) }
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(store.ranked) { briefing in
-                        Button { store.select(briefing.point.id) } label: {
-                            PointRankCard(briefing: briefing)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(store.ranked) { briefing in
+                            Button { store.select(briefing.point.id) } label: {
+                                PointRankCard(briefing: briefing)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                .padding(12)
             }
         }
-        .background(FieldColor.ink)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FieldColor.ink.opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(FieldColor.line, lineWidth: 1))
         .foregroundStyle(FieldColor.paper)
     }
 }

@@ -593,6 +593,16 @@ enum SkinScubaClient {
         var connected: Bool
     }
 
+    /// 예전에 붙은 HTTP/3 기록을 쓰지 않습니다. 거절 응답이 시간 초과로 가려지지 않게 합니다.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 25
+        config.timeoutIntervalForResource = 40
+        config.httpAdditionalHeaders = ["Accept": "application/json"]
+        return URLSession(configuration: config)
+    }()
+
     /// 활용가이드에 있는 스킨스쿠버지수 오퍼레이션입니다. 기존 공공데이터 키만 씁니다.
     static func load(latitude: Double, longitude: Double, radiusKm: Double, apiKey: String, night: Bool) async -> Load {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -604,8 +614,10 @@ enum SkinScubaClient {
             return Load(places: [], note: "스킨스쿠버지수 없음. 조회 주소를 만들지 못했습니다.", connected: false)
         }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 30
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        request.timeoutInterval = 25
+        request.assumesHTTP3Capable = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await session.data(for: request),
               let http = response as? HTTPURLResponse else {
             return Load(places: [], note: "스킨스쿠버지수 없음. 조회에 실패했습니다.", connected: false)
         }

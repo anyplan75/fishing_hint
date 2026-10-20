@@ -104,18 +104,22 @@ enum PublicTideClient {
                 note: "가장 가까운 조석 예보지점 \(nearest.station.name)이 \(distanceText)km라 호출하지 않았습니다. 들물·날물은 바다 예보 모델입니다."
             )
         }
-        var samples = await load(station: nearest.station, from: from, to: to, apiKey: key)
+        let loaded = await load(station: nearest.station, from: from, to: to, apiKey: key)
+        var samples = loaded.samples
         var seen = Set<TimeInterval>()
         samples = samples.filter { seen.insert($0.time.timeIntervalSince1970).inserted }
         samples.sort { $0.time < $1.time }
         if samples.isEmpty {
+            let note = loaded.rejected
+                ? "조석 없음. 인증키가 이 자료를 거절했습니다."
+                : "\(nearest.station.name) 조석예보를 가져오지 못했습니다. 들물·날물은 바다 예보 모델만 봅니다."
             return TideReport(
                 stationName: nearest.station.name,
                 stationCode: nearest.station.code,
                 distanceKm: nearest.distanceKm,
                 samples: [],
                 usable: false,
-                note: "\(nearest.station.name) 조석예보를 가져오지 못했습니다. 들물·날물은 바다 예보 모델만 봅니다."
+                note: note
             )
         }
         let usable = nearest.distanceKm <= 35
@@ -132,24 +136,51 @@ enum PublicTideClient {
         )
     }
 
-    private static func load(station: TideStation, from: Date, to: Date, apiKey: String) async -> [TideSample] {
+    private struct LoadedTide {
+        var samples: [TideSample]
+        var rejected: Bool
+    }
+
+    private enum DayTide {
+        case samples([TideSample])
+        case rejected
+        case miss
+    }
+
+    /// 예전에 붙은 HTTP/3 기록을 쓰지 않습니다. 거절 응답이 그 길에 가려지지 않게 합니다.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 25
+        config.timeoutIntervalForResource = 40
+        config.httpAdditionalHeaders = ["Accept": "application/json"]
+        return URLSession(configuration: config)
+    }()
+
+    private static func load(station: TideStation, from: Date, to: Date, apiKey: String) async -> LoadedTide {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
         var day = calendar.startOfDay(for: from)
         let last = calendar.startOfDay(for: to)
         var samples: [TideSample] = []
+        var rejected = false
         while day <= last {
             let stamp = dayStamp(day, calendar: calendar)
-            if let chunk = await oneDay(code: station.code, day: stamp, apiKey: apiKey) {
+            switch await oneDay(code: station.code, day: stamp, apiKey: apiKey) {
+            case .samples(let chunk):
                 samples.append(contentsOf: chunk)
+            case .rejected:
+                rejected = true
+            case .miss:
+                break
             }
             guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
             day = next
         }
-        return samples
+        return LoadedTide(samples: samples, rejected: rejected)
     }
 
-    private static func oneDay(code: String, day: String, apiKey: String) async -> [TideSample]? {
+    private static func oneDay(code: String, day: String, apiKey: String) async -> DayTide {
         var parts = URLComponents(string: "https://apis.data.go.kr/1192136/tideFcstTime/GetTideFcstTimeApiService")
         parts?.queryItems = [
             URLQueryItem(name: "serviceKey", value: apiKey),
@@ -160,16 +191,29 @@ enum PublicTideClient {
             URLQueryItem(name: "numOfRows", value: "48"),
             URLQueryItem(name: "pageNo", value: "1"),
         ]
-        guard let url = parts?.url else { return nil }
+        guard let url = parts?.url else { return .miss }
         var request = URLRequest(url: url)
         request.timeoutInterval = 25
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let object = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        request.assumesHTTP3Capable = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse else { return .miss }
+        if let text = String(data: data, encoding: .utf8), keyRejected(text) {
+            return .rejected
+        }
+        guard (200..<300).contains(http.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data) else { return .miss }
         var items: [[String: Any]] = []
         collect(object, into: &items)
         let samples = items.compactMap(sample)
-        return samples.isEmpty ? nil : samples
+        return samples.isEmpty ? .miss : .samples(samples)
+    }
+
+    private static func keyRejected(_ text: String) -> Bool {
+        text.contains("SERVICE_KEY_IS_NOT_REGISTERED_ERROR")
+            || text.contains("등록되지 않은 서비스키")
+            || text.contains("SERVICE_ACCESS_DENIED_ERROR")
+            || text.contains("PERMISSION_DENIED")
     }
 
     private static func collect(_ value: Any, into items: inout [[String: Any]]) {
