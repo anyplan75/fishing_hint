@@ -74,6 +74,14 @@ final class AppStore: ObservableObject {
     @Published var busy = false
     @Published var flyToken = 0
     @Published var searchHits: [PlaceNameClient.Hit] = []
+    /// 흔들리는 현재 위치를 가까운 길에 붙였는지 짧은 안내입니다.
+    @Published var roadNote = ""
+    /// 현재 위치에서 고른 자리까지 그린 길과 짧은 안내입니다.
+    @Published var routeNote = ""
+    @Published var routeLine: [[Double]] = []
+    @Published var mapFit = 0
+    @Published var destination: PlaceNameClient.Hit?
+    @Published var selectedSearchId: String?
     @Published var regionTitle = "선택한 지역"
     @Published var dataGoKrKey = ""
     /// 바다해도만 씁니다. 조석예보 키와 섞지 않습니다.
@@ -107,6 +115,9 @@ final class AppStore: ObservableObject {
     private var recommendGen = 0
     private var savedPlanGen = 0
     private var didFirstFix = false
+    private var roadGen = 0
+    private var routeGen = 0
+    private var rawTrack: [(longitude: Double, latitude: Double)] = []
 
     var ranked: [PointBriefing] {
         briefings.values.sorted { left, right in
@@ -150,15 +161,18 @@ final class AppStore: ObservableObject {
 
     func applyFix(_ coordinate: CLLocationCoordinate2D) {
         let moved: Double
-        if let userLat, let userLon {
-            moved = Geo.kilometers(userLat, userLon, coordinate.latitude, coordinate.longitude)
+        if let last = rawTrack.last {
+            moved = Geo.kilometers(last.latitude, last.longitude, coordinate.latitude, coordinate.longitude)
         } else {
             moved = 999
         }
-        guard moved >= 0.03 || !didFirstFix else { return }
+        guard moved >= 0.03 || rawTrack.isEmpty else { return }
+        rawTrack.append((longitude: coordinate.longitude, latitude: coordinate.latitude))
+        if rawTrack.count > 8 { rawTrack.removeFirst(rawTrack.count - 8) }
         userLat = coordinate.latitude
         userLon = coordinate.longitude
         locationText = "현재 위치를 사용 중"
+        snapRoad()
         guard useMyLocation else { return }
         if !didFirstFix || moved > 2 {
             didFirstFix = true
@@ -327,36 +341,114 @@ final class AppStore: ObservableObject {
     func searchPlaces(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        routeLine = []
+        routeNote = ""
+        destination = nil
+        selectedSearchId = nil
+        let latitude = userLat ?? centerLat
+        let longitude = userLon ?? centerLon
         Task {
-            let found = await PlaceNameClient.forward(
+            let found = await MapboxGuide.search(
                 query: trimmed,
-                latitude: centerLat,
-                longitude: centerLon,
+                latitude: latitude,
+                longitude: longitude,
                 token: mapboxToken
             )
             noteMapbox(found.reach)
             searchHits = found.hits
+            if found.hits.isEmpty {
+                statusText = found.note
+                return
+            }
+            let restaurants = found.hits.filter { $0.kind == .restaurant }.count
+            let lodgings = found.hits.filter { $0.kind == .lodging }.count
+            if restaurants > 0 && lodgings == 0 {
+                statusText = "식당 \(restaurants)곳을 핀으로 표시했습니다."
+            } else if lodgings > 0 && restaurants == 0 {
+                statusText = "숙소 \(lodgings)곳을 핀으로 표시했습니다."
+            } else {
+                statusText = "\(found.hits.count)곳을 지도 핀으로 표시했습니다."
+            }
+            mapFit += 1
         }
+    }
+
+    func openSearch(_ pinId: String) {
+        let key = pinId.hasPrefix("search-") ? String(pinId.dropFirst("search-".count)) : pinId
+        guard let hit = searchHits.first(where: { $0.id == key }) else { return }
+        selectedSearchId = hit.id
+        go(to: hit)
     }
 
     func go(to hit: PlaceNameClient.Hit) {
         centerLat = hit.latitude
         centerLon = hit.longitude
-        regionTitle = hit.name
+        regionTitle = hit.title
         useMyLocation = false
-        searchHits = []
+        destination = hit
+        selectedSearchId = hit.id
         flyToken += 1
         saveDisk()
+        guide(to: hit)
         refresh()
+    }
+
+    /// 출발은 현재 위치, 도착은 고른 자리나 검색 결과입니다.
+    func guideChosen() {
+        if let id = selectedSearchId, let hit = searchHits.first(where: { $0.id == id }) {
+            guide(to: hit)
+            return
+        }
+        if let destination {
+            guide(to: destination)
+            return
+        }
+        guard let point = chosenPoint() else {
+            routeLine = []
+            routeNote = "도착 자리를 고르거나 검색하세요."
+            return
+        }
+        guide(to: PlaceNameClient.Hit(id: point.id, name: point.name, latitude: point.latitude, longitude: point.longitude))
+    }
+
+    func guide(to hit: PlaceNameClient.Hit) {
+        destination = hit
+        routeGen += 1
+        let generation = routeGen
+        guard let userLat, let userLon else {
+            routeLine = []
+            routeNote = "현재 위치가 없어 길을 계산하지 못했습니다."
+            mapFit += 1
+            return
+        }
+        routeNote = "길을 계산하는 중"
+        let token = mapboxToken
+        let name = hit.title
+        Task {
+            let drawn = await MapboxGuide.route(
+                fromLon: userLon,
+                fromLat: userLat,
+                toLon: hit.longitude,
+                toLat: hit.latitude,
+                name: name,
+                token: token
+            )
+            guard generation == self.routeGen else { return }
+            routeLine = drawn.line
+            routeNote = drawn.note
+            mapFit += 1
+        }
     }
 
     func select(_ id: String) {
         if tapped?.id == id, tapped?.source == "찍은자리", briefings[id] == nil {
             askSaveName(for: tapped!)
+            guide(to: PlaceNameClient.Hit(id: tapped!.id, name: tapped!.name, latitude: tapped!.latitude, longitude: tapped!.longitude))
             return
         }
         selectedPointId = id
-        if briefings[id] != nil {
+        if let briefing = briefings[id] {
+            guide(to: PlaceNameClient.Hit(id: briefing.point.id, name: briefing.point.name, latitude: briefing.point.latitude, longitude: briefing.point.longitude))
             Task { await polish(id: id, generation: refreshGen) }
             return
         }
@@ -365,6 +457,7 @@ final class AppStore: ObservableObject {
             detailMiss[id] = "이 자리를 찾지 못했습니다."
             return
         }
+        guide(to: PlaceNameClient.Hit(id: point.id, name: point.name, latitude: point.latitude, longitude: point.longitude))
         fillBriefing(for: point)
     }
 
@@ -1098,6 +1191,34 @@ final class AppStore: ObservableObject {
         }
         aiLink = .connected
         return text
+    }
+
+    private func snapRoad() {
+        roadGen += 1
+        let generation = roadGen
+        let points = rawTrack
+        guard let fallback = points.last else { return }
+        Task {
+            let snapped = await MapboxGuide.matchRoad(points: points, token: mapboxToken)
+            guard generation == self.roadGen else { return }
+            if snapped.matched {
+                userLat = snapped.latitude
+                userLon = snapped.longitude
+            } else {
+                userLat = fallback.latitude
+                userLon = fallback.longitude
+            }
+            roadNote = snapped.note
+        }
+    }
+
+    private func chosenPoint() -> FishingPoint? {
+        if let id = selectedPointId {
+            if let briefing = briefings[id] { return briefing.point }
+            if let mine = myPoints.first(where: { $0.id == id }) { return mine }
+            if tapped?.id == id { return tapped }
+        }
+        return tapped
     }
 
     func noteMap(ok: Bool) {

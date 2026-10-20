@@ -51,6 +51,8 @@ struct MapPin: Identifiable {
     var longitude: Double
     var score: Int
     var selected: Bool
+    /// 식당, 숙소, 일반 검색 핀입니다. 비어 있으면 낚시 점수 핀입니다.
+    var marker: String = ""
 }
 
 struct MapboxMapView: View {
@@ -61,6 +63,8 @@ struct MapboxMapView: View {
     var userLon: Double?
     var radiusKm: Double
     var flyToken: Int
+    var fitToken: Int
+    var route: [[Double]]
     var pins: [MapPin]
     var onTap: (Double, Double) -> Void
     var onSelect: (String) -> Void
@@ -76,6 +80,8 @@ struct MapboxMapView: View {
             userLon: userLon,
             radiusKm: radiusKm,
             flyToken: flyToken,
+            fitToken: fitToken,
+            route: route,
             pins: pins,
             onTap: onTap,
             onSelect: onSelect,
@@ -94,6 +100,8 @@ private struct MapboxWebView: UIViewRepresentable {
     var userLon: Double?
     var radiusKm: Double
     var flyToken: Int
+    var fitToken: Int
+    var route: [[Double]]
     var pins: [MapPin]
     var onTap: (Double, Double) -> Void
     var onSelect: (String) -> Void
@@ -122,7 +130,7 @@ private struct MapboxWebView: UIViewRepresentable {
     }
 
     private func currentState() -> MapState {
-        MapState(token: token, latitude: latitude, longitude: longitude, userLat: userLat, userLon: userLon, radiusKm: radiusKm, flyToken: flyToken, pins: pins)
+        MapState(token: token, latitude: latitude, longitude: longitude, userLat: userLat, userLon: userLon, radiusKm: radiusKm, flyToken: flyToken, fitToken: fitToken, route: route, pins: pins)
     }
 }
 #else
@@ -134,6 +142,8 @@ private struct MapboxWebView: NSViewRepresentable {
     var userLon: Double?
     var radiusKm: Double
     var flyToken: Int
+    var fitToken: Int
+    var route: [[Double]]
     var pins: [MapPin]
     var onTap: (Double, Double) -> Void
     var onSelect: (String) -> Void
@@ -161,7 +171,7 @@ private struct MapboxWebView: NSViewRepresentable {
     }
 
     private func currentState() -> MapState {
-        MapState(token: token, latitude: latitude, longitude: longitude, userLat: userLat, userLon: userLon, radiusKm: radiusKm, flyToken: flyToken, pins: pins)
+        MapState(token: token, latitude: latitude, longitude: longitude, userLat: userLat, userLon: userLon, radiusKm: radiusKm, flyToken: flyToken, fitToken: fitToken, route: route, pins: pins)
     }
 }
 #endif
@@ -174,6 +184,8 @@ private struct MapState {
     var userLon: Double?
     var radiusKm: Double
     var flyToken: Int
+    var fitToken: Int
+    var route: [[Double]]
     var pins: [MapPin]
 
     var zoom: Double {
@@ -191,6 +203,7 @@ private struct MapState {
                 "lon": pin.longitude,
                 "score": pin.score,
                 "selected": pin.selected,
+                "marker": pin.marker,
             ])
         }
         var object: [String: Any] = [
@@ -200,6 +213,8 @@ private struct MapState {
             "radius": radiusKm * 1000,
             "zoom": zoom,
             "fly": flyToken,
+            "fit": fitToken,
+            "route": route,
             "pins": pinObjects,
         ]
         if let userLat, let userLon {
@@ -305,6 +320,32 @@ private enum MapPage {
       return coords;
     }
     function color(score){ if (score < 0) return '#f4f7ef'; if (score >= 75) return '#d6f25c'; if (score >= 60) return '#8fd3ff'; return '#ff6b4a'; }
+    function pinColor(pin){
+      if (pin.marker === 'restaurant') return '#ffb020';
+      if (pin.marker === 'lodging') return '#c9a0ff';
+      if (pin.marker === 'place') return '#8fd3ff';
+      return color(pin.score);
+    }
+    function fitView(state){
+      if (!map || !state || !state.fit || state.fit === window.__fit) return;
+      window.__fit = state.fit;
+      const spots = [];
+      if (state.route && state.route.length > 1) {
+        state.route.forEach(function(point){ if (point && point.length === 2) spots.push(point); });
+      } else {
+        (state.pins || []).forEach(function(pin){ if (pin.marker) spots.push([pin.lon, pin.lat]); });
+        if (state.userLat != null) spots.push([state.userLon, state.userLat]);
+      }
+      if (!spots.length) return;
+      map.stop();
+      if (spots.length === 1) {
+        map.flyTo({ center: spots[0], zoom: 15 });
+        return;
+      }
+      const bounds = new mapboxgl.LngLatBounds(spots[0], spots[0]);
+      spots.forEach(function(point){ bounds.extend(point); });
+      map.fitBounds(bounds, { padding: 56, maxZoom: 16, duration: 800 });
+    }
     function ensure(token, lon, lat, zoom) {
       if (map || !token) return;
       mapboxgl.accessToken = token;
@@ -331,6 +372,9 @@ private enum MapPage {
         map.addSource('radius', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
         map.addLayer({ id:'radius-fill', type:'fill', source:'radius', paint:{ 'fill-color':'#1c8c86', 'fill-opacity':0.12 } });
         map.addLayer({ id:'radius-line', type:'line', source:'radius', paint:{ 'line-color':'#d6f25c', 'line-width':1.4 } });
+        map.addSource('route', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
+        map.addLayer({ id:'route-case', type:'line', source:'route', layout:{ 'line-cap':'round', 'line-join':'round' }, paint:{ 'line-color':'#071018', 'line-width':8 } });
+        map.addLayer({ id:'route', type:'line', source:'route', layout:{ 'line-cap':'round', 'line-join':'round' }, paint:{ 'line-color':'#d6f25c', 'line-width':4 } });
         map.addSource('pins', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
         map.addLayer({ id:'pins', type:'circle', source:'pins', paint:{
           'circle-radius':['case', ['get','selected'], 11, 8],
@@ -369,14 +413,19 @@ private enum MapPage {
       map.getSource('radius').setData({ type:'Feature', geometry:{ type:'Polygon', coordinates:[ring] } });
       const features = (state.pins || []).map(pin => ({
         type:'Feature',
-        properties:{ id: pin.id, name: pin.name, score: pin.score, selected: !!pin.selected, color: color(pin.score) },
+        properties:{ id: pin.id, name: pin.name, score: pin.score, selected: !!pin.selected, marker: pin.marker || '', color: pinColor(pin) },
         geometry:{ type:'Point', coordinates:[pin.lon, pin.lat] }
       }));
       map.getSource('pins').setData({ type:'FeatureCollection', features: features });
+      const line = (state.route && state.route.length > 1) ? [{
+        type:'Feature', properties:{}, geometry:{ type:'LineString', coordinates: state.route }
+      }] : [];
+      map.getSource('route').setData({ type:'FeatureCollection', features: line });
       const userFeatures = (state.userLat == null) ? [] : [{
         type:'Feature', properties:{}, geometry:{ type:'Point', coordinates:[state.userLon, state.userLat] }
       }];
       map.getSource('user').setData({ type:'FeatureCollection', features: userFeatures });
+      fitView(state);
     };
     </script>
     </body>

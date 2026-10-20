@@ -48,9 +48,17 @@ struct MapScreen: View {
                     userLon: store.userLon,
                     radiusKm: store.radiusKm,
                     flyToken: store.flyToken,
+                    fitToken: store.mapFit,
+                    route: store.routeLine,
                     pins: pins,
                     onTap: { lat, lon in store.dropSpot(latitude: lat, longitude: lon) },
-                    onSelect: { store.select($0) },
+                    onSelect: { id in
+                        if id.hasPrefix("search-") {
+                            store.openSearch(id)
+                        } else {
+                            store.select(id)
+                        }
+                    },
                     onMove: { lat, lon in store.rememberMap(latitude: lat, longitude: lon) },
                     onMap: { store.noteMap(ok: $0) }
                 )
@@ -89,13 +97,38 @@ struct MapScreen: View {
                 selected: point.id == store.selectedPointId
             ))
         }
+        for hit in store.searchHits where !items.contains(where: { $0.id == "search-\(hit.id)" }) {
+            items.append(MapPin(
+                id: "search-\(hit.id)",
+                name: hit.title,
+                latitude: hit.latitude,
+                longitude: hit.longitude,
+                score: -1,
+                selected: hit.id == store.selectedSearchId,
+                marker: hit.marker
+            ))
+        }
+        if let destination = store.destination {
+            let shown = items.contains { $0.id == destination.id || $0.id == "search-\(destination.id)" }
+            if !shown {
+                items.append(MapPin(
+                    id: "search-\(destination.id)",
+                    name: destination.title,
+                    latitude: destination.latitude,
+                    longitude: destination.longitude,
+                    score: -1,
+                    selected: true,
+                    marker: destination.marker
+                ))
+            }
+        }
         return items
     }
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                TextField("지역, 방파제, 포구 검색", text: $query)
+                TextField("지역, 식당, 숙소 검색", text: $query)
                     .textFieldStyle(.plain)
                     .padding(8)
                     .background(FieldColor.card)
@@ -107,7 +140,7 @@ struct MapScreen: View {
             if !store.searchHits.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(store.searchHits) { hit in
-                        Button(hit.name) { store.go(to: hit); query = hit.name }
+                        Button(hit.title) { store.openSearch(hit.id); query = hit.title }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
                             .foregroundStyle(FieldColor.paper)
@@ -143,14 +176,31 @@ struct MapScreen: View {
                     .buttonStyle(FieldButton(fill: FieldColor.card2))
                 Spacer(minLength: 0)
             }
+            HStack {
+                Button("길 안내") { store.guideChosen() }
+                    .buttonStyle(FieldButton(fill: FieldColor.sea))
+                Spacer(minLength: 0)
+            }
             Text("\(store.useMyLocation ? "내 주변" : store.regionTitle) · \(store.locationText)")
                 .font(.caption2)
                 .foregroundStyle(FieldColor.muted)
                 .lineLimit(1)
+            if !store.roadNote.isEmpty {
+                Text(store.roadNote)
+                    .font(.caption2)
+                    .foregroundStyle(FieldColor.muted)
+                    .lineLimit(1)
+            }
+            if !store.routeNote.isEmpty {
+                Text(store.routeNote)
+                    .font(.caption)
+                    .foregroundStyle(FieldColor.paper)
+                    .lineLimit(2)
+            }
             Text(store.statusText)
                 .font(.caption)
                 .foregroundStyle(FieldColor.paper)
-                .lineLimit(1)
+                .lineLimit(2)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

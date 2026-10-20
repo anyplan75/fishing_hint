@@ -9,11 +9,36 @@ enum GeocodeReach {
 }
 
 enum PlaceNameClient {
+    enum PlaceKind {
+        /// 식당·숙소가 아닌 장소입니다. 화면에 식당이나 숙소라고 적지 않습니다.
+        case plain
+        case restaurant
+        case lodging
+    }
+
     struct Hit: Identifiable {
         var id: String
         var name: String
         var latitude: Double
         var longitude: Double
+        var kind: PlaceKind = .plain
+
+        /// 검색어가 식당·숙소이고, 결과 종류도 그럴 때만 그 말을 붙입니다.
+        var title: String {
+            switch kind {
+            case .restaurant: return "\(name) · 식당"
+            case .lodging: return "\(name) · 숙소"
+            case .plain: return name
+            }
+        }
+
+        var marker: String {
+            switch kind {
+            case .restaurant: return "restaurant"
+            case .lodging: return "lodging"
+            case .plain: return "place"
+            }
+        }
     }
 
     /// 동네 이름과 그 위 시·도 이름을 함께 모읍니다. 동네 이름만으로는 제주 글을 거르지 못합니다.
