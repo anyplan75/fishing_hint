@@ -157,6 +157,8 @@ struct SettingsView: View {
                         Text(store.fishingIndexLink.connected ? "바다낚시지수 연결됨" : store.fishingIndexLink.reason)
                         Text(store.fishingSpotLink.connected ? "전국낚시터 연결됨" : store.fishingSpotLink.reason)
                         Text(store.scubaLink.connected ? "스킨스쿠버지수 연결됨" : store.scubaLink.reason)
+                        Text(store.naverLink.connected ? "네이버 검색 연결됨" : store.naverLink.reason)
+                        Text(store.googleLink.connected ? "구글 검색 연결됨" : store.googleLink.reason)
                     }
                     .font(.subheadline)
                 }

@@ -13,6 +13,12 @@ struct SecretPair {
     var youtube: String
     /// 바다낚시지수 조회만 읽는 키입니다. 조석예보 키와 다릅니다.
     var fishingIndex: String
+    /// 네이버 공식 검색만 읽습니다. 없으면 빈 문자열입니다.
+    var naverClientId: String
+    var naverClientSecret: String
+    /// 구글 공식 검색만 읽습니다. 없으면 빈 문자열입니다.
+    var googleSearchKey: String
+    var googleSearchEngineId: String
 }
 
 enum SecretVault {
@@ -23,7 +29,11 @@ enum SecretVault {
             dataGoKr: BakedSecrets.dataGoKr,
             haereum: BakedSecrets.khoaHaereum,
             youtube: BakedSecrets.youtube,
-            fishingIndex: BakedSecrets.fishingIndex
+            fishingIndex: BakedSecrets.fishingIndex,
+            naverClientId: BakedSecrets.naverClientId,
+            naverClientSecret: BakedSecrets.naverClientSecret,
+            googleSearchKey: BakedSecrets.googleSearchKey,
+            googleSearchEngineId: BakedSecrets.googleSearchEngineId
         )
     }
 }

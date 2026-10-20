@@ -90,6 +90,12 @@ final class AppStore: ObservableObject {
     @Published var youtubeKey = ""
     /// 바다낚시지수 조회만 씁니다. 조석예보 키와 다릅니다.
     @Published var fishingIndexKey = ""
+    /// 네이버 공식 검색만 씁니다. 없으면 화면에는 필요한 키 이름만 적습니다.
+    @Published var naverClientId = ""
+    @Published var naverClientSecret = ""
+    /// 구글 공식 검색만 씁니다. 유튜브 키로 대신 부르지 않습니다.
+    @Published var googleSearchKey = ""
+    @Published var googleSearchEngineId = ""
     @Published var planPicks: [SpotPick] = []
     @Published var nowPicks: [SpotPick] = []
     @Published var shorePicks: [SpotPick] = []
@@ -106,6 +112,8 @@ final class AppStore: ObservableObject {
     @Published var fishingIndexLink = LinkLine.absent("바다낚시지수 없음. 비밀 파일에 DATA_GO_KR_FISHING_INDEX_KEY 가 없습니다.")
     @Published var fishingSpotLink = LinkLine.absent("전국낚시터 없음. 아직 표준데이터를 부르지 않았습니다.")
     @Published var scubaLink = LinkLine.absent("스킨스쿠버지수 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
+    @Published var naverLink = LinkLine.absent("네이버 검색 없음. 비밀 파일에 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 이 필요합니다.")
+    @Published var googleLink = LinkLine.absent("구글 검색 없음. 비밀 파일에 GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_ENGINE_ID 가 필요합니다.")
     @Published var savedTimes: [String: SavedSpotTimes] = [:]
     @Published var savedTimesNote = "저장한 자리의 낚시 시간과 해루질 시간을 받은 예보로 계산합니다."
 
@@ -137,6 +145,10 @@ final class AppStore: ObservableObject {
         haereumKey = secrets.haereum
         youtubeKey = secrets.youtube
         fishingIndexKey = secrets.fishingIndex
+        naverClientId = secrets.naverClientId
+        naverClientSecret = secrets.naverClientSecret
+        googleSearchKey = secrets.googleSearchKey
+        googleSearchEngineId = secrets.googleSearchEngineId
         locator.onFix = { [weak self] coordinate in
             self?.applyFix(coordinate)
         }
@@ -1006,12 +1018,23 @@ final class AppStore: ObservableObject {
             )
             let index = await indexCall
             let spots = await spotCall
+            let web = await PlaceWebSearch.load(
+                latitude: center.lat,
+                longitude: center.lon,
+                radiusKm: center.radius,
+                mapboxToken: mapboxToken,
+                naverId: naverClientId,
+                naverSecret: naverClientSecret,
+                googleKey: googleSearchKey,
+                googleEngine: googleSearchEngineId
+            )
             noteFishingIndex(index)
             noteFishingSpots(spots)
+            noteWeb(web)
             if !index.connected {
                 OfficialNotes.blocked = index.note
             }
-            var merged = outcome.points + index.points + spots.points
+            var merged = outcome.points + index.points + spots.points + web.points
             var kept: [FishingPoint] = []
             for point in merged {
                 if kept.contains(where: { Geo.kilometers($0.latitude, $0.longitude, point.latitude, point.longitude) < 0.4 && $0.name == point.name }) {
@@ -1021,12 +1044,12 @@ final class AppStore: ObservableObject {
             }
             SeaFishingIndexClient.attach(to: kept, anchors: index.points)
             guard !kept.isEmpty else {
-                var reason = [outcome.failure, index.note, spots.note].compactMap { $0 }.filter { !$0.isEmpty }
+                var reason = [outcome.failure, index.note, spots.note, web.note].compactMap { $0 }.filter { !$0.isEmpty }
                 if reason.isEmpty { reason = ["추천할 자리를 정하지 못했습니다. 없는 자리는 만들지 않았습니다."] }
                 return .failure(RecommendMessageError(message: reason.joined(separator: " ")))
             }
             located = kept
-            var lines = [outcome.points.isEmpty ? (outcome.failure ?? "") : outcome.intro, index.note, spots.note]
+            var lines = [outcome.points.isEmpty ? (outcome.failure ?? "") : outcome.intro, index.note, spots.note, web.note]
             intro = lines.filter { !$0.isEmpty }.joined(separator: " ")
             title = anchorName
             mentionMemory = MentionMemory(signature: signature, at: Date(), points: located, intro: intro, title: title)
@@ -1305,6 +1328,17 @@ final class AppStore: ObservableObject {
         youtubeLink = linkForKey(youtubeKey, emptyReason: "유튜브 없음. 비밀 파일에 YOUTUBE_API_KEY 가 없습니다.", waiting: "유튜브 없음. 키는 있으나 아직 호출하지 않았습니다.", current: youtubeLink)
         fishingIndexLink = linkForKey(fishingIndexKey, emptyReason: "바다낚시지수 없음. 비밀 파일에 DATA_GO_KR_FISHING_INDEX_KEY 가 없습니다.", waiting: "바다낚시지수 없음. 키는 있으나 아직 호출하지 않았습니다.", current: fishingIndexLink)
         scubaLink = linkForKey(dataGoKrKey, emptyReason: "스킨스쿠버지수 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.", waiting: "스킨스쿠버지수 없음. 키는 있으나 아직 호출하지 않았습니다.", current: scubaLink)
+        if naverClientId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || naverClientSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            naverLink = .absent("네이버 검색 없음. 비밀 파일에 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 이 필요합니다.")
+        }
+        if googleSearchKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || googleSearchEngineId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            googleLink = .absent("구글 검색 없음. 비밀 파일에 GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_ENGINE_ID 가 필요합니다.")
+        }
+    }
+
+    private func noteWeb(_ load: PlaceWebSearch.Load) {
+        naverLink = load.naverConnected ? .connected : .absent(load.naverReason)
+        googleLink = load.googleConnected ? .connected : .absent(load.googleReason)
     }
 
     private func noteFishingIndex(_ load: SeaFishingIndexClient.Load) {

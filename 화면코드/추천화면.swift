@@ -65,7 +65,7 @@ struct RecommendScreen: View {
 
     private var planPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 그 일대 공개 글, 지역 이름으로 찾은 유튜브 공개 영상, 바다낚시지수 갯바위, 전국낚시터의 유료·선상만 읽습니다. 기준점 반경 안에서 위치를 정한 자리만, 받은 날씨·물때와 바다낚시지수 여건으로 최대 10곳을 줄 세웁니다.")
+            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 지도에서 받은 지명에 낚시를 붙여 네이버·구글 공식 검색을 하고, 글에 있는 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 기준점 반경 안에서 위치를 정한 자리만 최대 10곳을 줄 세웁니다. 검색 키가 없으면 필요한 키 이름만 적습니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             DatePicker("날짜", selection: $day, displayedComponents: .date)
@@ -96,7 +96,7 @@ struct RecommendScreen: View {
 
     private var nowPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 현재 위치 한 점입니다. 그 일대 공개 글, 지역 이름으로 찾은 유튜브 공개 영상, 바다낚시지수 갯바위, 전국낚시터의 유료·선상만 읽습니다. 기준점 반경 안에서 위치를 정한 자리만, 지금부터 6시간의 받은 날씨·물때와 바다낚시지수 여건으로 최대 3곳을 줄 세웁니다.")
+            Text("기준은 현재 위치 한 점입니다. 지도에서 받은 지명에 낚시를 붙여 네이버·구글 공식 검색을 하고, 글에 있는 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 기준점 반경 안에서 위치를 정한 자리만 최대 3곳을 줄 세웁니다. 검색 키가 없으면 필요한 키 이름만 적습니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             Button(store.recommendBusy ? "계산 중" : "지금 3곳 찾기") { store.recommendNow() }

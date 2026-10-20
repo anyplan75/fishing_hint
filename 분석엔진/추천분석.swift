@@ -485,6 +485,9 @@ enum RecommendEngine {
     private static func spotFacts(point: FishingPoint, hour: HourCondition?, moon: MoonInfo, fromUser: Bool) -> SpotFacts {
         let waterLabel = hour?.seaC == nil ? "기온 \(FieldFormat.temp(hour?.airC))" : "수온 \(FieldFormat.temp(hour?.seaC))"
         var place = "\(point.place.title), \(point.water.title)."
+        if point.source == "네이버" || point.source == "구글" {
+            place = "\(point.source) 공식 검색, \(point.water.title)."
+        }
         if point.isMine {
             place += " 내가 저장한 자리."
         } else if point.source == "찍은자리" {
@@ -501,6 +504,8 @@ enum RecommendEngine {
             place += " 전국낚시터정보표준데이터의 유료 낚시터 또는 선상 시설."
         } else if point.source == "스킨스쿠버" {
             place += " 국립해양조사원 스킨스쿠버지수 포인트."
+        } else if point.source == "네이버" || point.source == "구글" {
+            place += " \(point.source) 공식 검색의 제목과 본문에 나온 이름을 지도에서 확인한 자리."
         } else {
             place += " 공개 지도에서 찾은 자리."
         }
