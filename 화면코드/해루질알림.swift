@@ -10,6 +10,10 @@ struct SavedSpotTimes: Identifiable {
     var fishingLines: [String]
     var dayLines: [String]
     var nightLines: [String]
+    /// 그 시간의 조건 적합도입니다. 조과를 보장하지 않습니다.
+    var successText: String
+    /// 공식 바다낚시지수와 조황 여건입니다. 없으면 지수 없음입니다.
+    var indexLine: String
 }
 
 enum GleanAlarm {

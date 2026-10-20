@@ -40,6 +40,18 @@ enum OfficialNotes {
         return use.max { $0.rank < $1.rank }?.line
     }
 
+    /// 카드에 성공률과 같이 보여 주는 짧은 지수 문장입니다. 없는 지수는 만들지 않습니다.
+    static func caption(pointId: String, species: String, when: Date) -> String {
+        let line = sentence(pointId: pointId, species: species, when: when) ?? "바다낚시지수 없음"
+        if line.contains("거절") {
+            return "바다낚시지수 없음. 인증키가 이 자료를 거절했습니다."
+        }
+        if line == "바다낚시지수 없음" || line == "지수 없음" || line.contains("없습니다") || line.contains("지어 넣지") {
+            return "지수 없음"
+        }
+        return line
+    }
+
     private static func speciesMatch(_ indexSpecies: String, _ picked: String) -> Bool {
         let name = indexSpecies.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name != "-" else { return false }
@@ -132,12 +144,41 @@ enum SeaFishingIndexClient {
     }
 
     private static func onePage(apiKey: String, day: String, page: Int) async -> OnePage {
+        var last: OnePage = .failed("바다낚시지수 없음. 조회에 실패했습니다.")
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+            }
+            last = await oneAttempt(apiKey: apiKey, day: day, page: page)
+            switch last {
+            case .rows, .rejected:
+                return last
+            case .failed:
+                continue
+            }
+        }
+        return last
+    }
+
+    /// 예전에 붙은 HTTP/3 기록을 쓰지 않습니다. 그 길로 가면 이 자료가 멈춥니다.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 25
+        config.timeoutIntervalForResource = 40
+        config.httpAdditionalHeaders = ["Accept": "application/json"]
+        return URLSession(configuration: config)
+    }()
+
+    private static func oneAttempt(apiKey: String, day: String, page: Int) async -> OnePage {
         guard let url = endpoint(apiKey: apiKey, day: day, page: page) else {
             return .failed("바다낚시지수 없음. 조회 주소를 만들지 못했습니다.")
         }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 30
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        request.timeoutInterval = 25
+        request.assumesHTTP3Capable = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await session.data(for: request),
               let http = response as? HTTPURLResponse else {
             return .failed("바다낚시지수 없음. 조회에 실패했습니다.")
         }
@@ -313,7 +354,7 @@ enum SeaFishingIndexClient {
                 .min { $0.1 < $1.1 }
             guard let near, let copied = OfficialNotes.rows[near.0.id] else {
                 OfficialNotes.rows[point.id] = [
-                    OfficialIndexRow(day: "", half: "", species: "", line: "이 자리는 바다낚시지수에 없습니다. 조황 여건을 지어 넣지 않았습니다.", rank: 0),
+                    OfficialIndexRow(day: "", half: "", species: "", line: "지수 없음", rank: 0),
                 ]
                 continue
             }

@@ -30,6 +30,9 @@ struct MapScreen: View {
             }
         }
         .background(FieldColor.ink)
+        .sheet(item: $store.savePrompt) { prompt in
+            NameSaveSheet(point: prompt.point)
+        }
     }
 
     private var mapLayer: some View {
@@ -74,6 +77,16 @@ struct MapScreen: View {
                 longitude: tapped.longitude,
                 score: -1,
                 selected: false
+            ))
+        }
+        for point in store.myPoints where point.isMine && !items.contains(where: { $0.id == point.id }) {
+            items.append(MapPin(
+                id: point.id,
+                name: point.name,
+                latitude: point.latitude,
+                longitude: point.longitude,
+                score: -1,
+                selected: point.id == store.selectedPointId
             ))
         }
         return items

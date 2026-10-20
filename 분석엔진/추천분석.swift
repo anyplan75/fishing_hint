@@ -370,9 +370,8 @@ enum RecommendEngine {
         } else {
             why.append(contentsOf: best.reasons.map { "조건표: \($0)" })
         }
-        if let indexLine = OfficialNotes.sentence(pointId: item.point.id, species: best.species, when: best.time) {
-            why.append(indexLine)
-        }
+        let indexLine = OfficialNotes.caption(pointId: item.point.id, species: best.species, when: best.time)
+        why.append(indexLine)
         if let lowNote { why.append(lowNote) }
         if let official = officialTideLine(at: best.time, tide: tide) { why.append(official) }
         why.append(tide.note)
@@ -414,7 +413,8 @@ enum RecommendEngine {
             publicSummary: publicNote.summary,
             publicWarnings: publicNote.warnings,
             factScript: script,
-            aiReason: nil
+            aiReason: nil,
+            indexLine: indexLine
         )
     }
 

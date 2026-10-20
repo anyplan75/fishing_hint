@@ -242,6 +242,14 @@ struct SpotPick: Identifiable {
     var publicWarnings: [String]
     var factScript: String
     var aiReason: String?
+    /// 그 자리에 붙은 공식 바다낚시지수입니다. 가까운 지수가 없으면 "지수 없음"입니다.
+    var indexLine: String
+}
+
+/// 지도나 추천에서 자리를 누른 뒤, 이름을 물어 저장할 때 쓰는 묶음입니다.
+struct SavePrompt: Identifiable {
+    let id = UUID()
+    var point: FishingPoint
 }
 
 struct DiskBox: Codable {

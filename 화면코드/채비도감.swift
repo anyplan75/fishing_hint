@@ -71,7 +71,7 @@ struct MyPointsView: View {
                     .font(.subheadline)
                     .foregroundStyle(FieldColor.wait)
                 if store.myPoints.isEmpty {
-                    Text("아직 없습니다. 지도에서 자리를 연 뒤 '내 포인트로 저장'을 누르세요.")
+                    Text("아직 없습니다. 지도나 추천에서 자리를 누른 뒤 이름을 적고 저장하세요. 이름을 비우면 여기에 나오지 않습니다.")
                         .padding(.top, 12)
                 }
                 ForEach(store.myPoints) { point in
@@ -91,6 +91,12 @@ struct MyPointsView: View {
                                     .foregroundStyle(FieldColor.muted)
                             }
                             if let times = store.savedTimes[point.id] {
+                                Text(times.successText)
+                                    .font(.headline.weight(.bold))
+                                    .foregroundStyle(FieldColor.paper)
+                                Text(times.indexLine)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(FieldColor.wait)
                                 timeBlock("낚시하기 좋은 때", lines: times.fishingLines, color: FieldColor.good)
                                 timeBlock("주간 해루질", lines: times.dayLines, color: FieldColor.wait)
                                 timeBlock("야간 해루질", lines: times.nightLines, color: FieldColor.glean)

@@ -169,7 +169,7 @@ struct RecommendScreen: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("숫자 읽는 법")
                     .font(.headline)
-                Text("성공률은 조건 적합도로 계산한 예상값입니다. 조과를 보장하지 않습니다.")
+                Text("성공률은 그 시간의 조건 적합도입니다. 카드에는 바다낚시지수를 같이 보여 줍니다. 가까운 지수가 없으면 지수 없음이라고 적고, 성공률은 그대로 보여 줍니다. 조과를 보장하지 않습니다.")
                 Text("예상 비용은 왕복 거리 ÷ 12km/L × 1,700원/L 을 천 원 단위로 반올림한 이동비입니다. 통행료와 선비는 넣지 않습니다.")
                 Text("인공지능 암호가 없으면 이유 문장만 빠지고, 시간·성공률·거리·비용·어종은 그대로입니다.")
             }
@@ -235,6 +235,10 @@ struct PickRow: View {
                     .font(.headline.weight(.bold))
                     .foregroundStyle(FieldColor.paper)
             }
+            Text(pick.indexLine)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(FieldColor.wait)
+                .lineLimit(3)
             Text(pick.point.name)
                 .font(.headline)
                 .foregroundStyle(FieldColor.paper)
@@ -266,6 +270,7 @@ struct PickRow: View {
 struct PickDetailView: View {
     @EnvironmentObject private var store: AppStore
     var pickId: String
+    @State private var naming = false
 
     var body: some View {
         if let pick = store.pick(id: pickId) {
@@ -281,8 +286,12 @@ struct PickDetailView: View {
     private func detail(_ pick: SpotPick) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Button("닫기") { store.selectedPickId = nil }
-                    .buttonStyle(FieldButton(fill: FieldColor.card2))
+                HStack {
+                    Button("닫기") { store.selectedPickId = nil }
+                        .buttonStyle(FieldButton(fill: FieldColor.card2))
+                    Button("이름 정하고 저장") { naming = true }
+                        .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
+                }
                 Text(pick.kind.title)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(FieldColor.sea)
@@ -293,7 +302,10 @@ struct PickDetailView: View {
                     .foregroundStyle(FieldColor.good)
                 Text("성공률 \(pick.successRate)% · \(pick.species)")
                     .font(.title3.weight(.semibold))
-                Text("성공률은 이 시각의 조건 적합도입니다. 조과를 보장하지 않습니다.")
+                Text(pick.indexLine)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(FieldColor.wait)
+                Text("성공률은 이 시각의 조건 적합도입니다. 바다낚시지수는 이 자리에 붙은 공식 지점의 지수와 조황 여건입니다. 조과를 보장하지 않습니다.")
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
                 HStack {
@@ -396,6 +408,9 @@ struct PickDetailView: View {
         }
         .background(FieldColor.ink)
         .foregroundStyle(FieldColor.paper)
+        .sheet(isPresented: $naming) {
+            NameSaveSheet(point: pick.point)
+        }
     }
 
     private func fact(_ name: String, _ value: String) -> some View {

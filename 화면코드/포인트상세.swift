@@ -7,6 +7,7 @@ struct PointDetailView: View {
     var pointId: String
     @State private var checked: Set<Int> = []
     @State private var editing = false
+    @State private var naming = false
 
     var body: some View {
         if let briefing = store.briefings[pointId] {
@@ -33,7 +34,7 @@ struct PointDetailView: View {
                         Button("자리 수정") { editing = true }
                             .buttonStyle(FieldButton(fill: FieldColor.card2))
                     } else {
-                        Button("내 포인트로 저장") { store.saveMine(from: briefing.point) }
+                        Button("이름 정하고 저장") { naming = true }
                             .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
                     }
                 }
@@ -160,6 +161,9 @@ struct PointDetailView: View {
         .sheet(isPresented: $editing) {
             PointEditSheet(point: briefing.point) { store.updateMine($0) }
         }
+        .sheet(isPresented: $naming) {
+            NameSaveSheet(point: briefing.point)
+        }
     }
 
     private func tackleBlock(_ plan: TacklePlan, title: String) -> some View {
@@ -255,11 +259,15 @@ struct PointEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("저장") {
+                        let trimmed = point.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        point.name = trimmed
                         if let value = Double(tempText) { point.measuredTempC = value }
                         point.source = "내포인트"
                         onSave(point)
                         dismiss()
                     }
+                    .disabled(point.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .onAppear {
@@ -267,5 +275,64 @@ struct PointEditSheet: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+    }
+}
+
+struct NameSaveSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    var point: FishingPoint
+    @State private var name: String
+    @FocusState private var focused: Bool
+
+    init(point: FishingPoint) {
+        self.point = point
+        let preset = point.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        _name = State(initialValue: preset == "찍은 자리" ? "" : preset)
+    }
+
+    var body: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("이 자리의 이름을 적으세요. 저장하면 내 포인트 목록에 이 이름이 남습니다. 이름을 비우면 저장하지 않습니다.")
+                    .font(.subheadline)
+                    .foregroundStyle(FieldColor.muted)
+                TextField("장소 이름", text: $name)
+                    .focused($focused)
+                    .textFieldStyle(.roundedBorder)
+                    .submitLabel(.done)
+                    .onSubmit { storeName() }
+                if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("이름을 비우면 저장하지 않습니다.")
+                        .font(.caption)
+                        .foregroundStyle(FieldColor.wait)
+                }
+                Button("저장") { storeName() }
+                    .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Spacer()
+            }
+            .padding(16)
+            .background(FieldColor.ink)
+            .foregroundStyle(FieldColor.paper)
+            .navigationTitle("이름 정하고 저장")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("저장") { storeName() }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear { focused = true }
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+    }
+
+    private func storeName() {
+        if store.commitNamedSave(point: point, name: name) {
+            dismiss()
+        }
     }
 }
