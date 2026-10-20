@@ -147,6 +147,7 @@ struct SettingsView: View {
                         Text(store.mapLink.connected ? "지도 연결됨" : store.mapLink.reason)
                         Text(store.aiLink.connected ? "인공지능 연결됨" : store.aiLink.reason)
                         Text(store.tideLink.connected ? "조석 연결됨" : store.tideLink.reason)
+                        Text(store.youtubeLink.connected ? "유튜브 연결됨" : store.youtubeLink.reason)
                     }
                     .font(.subheadline)
                 }

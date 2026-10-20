@@ -390,6 +390,8 @@ enum RecommendEngine {
             place += " 지도에서 찍은 자리."
         } else if point.source == "공개글" {
             place += " 공개 글에 나온 지명을 지도에서 확인한 자리."
+        } else if point.source == "유튜브" {
+            place += " 유튜브 공개 영상의 제목이나 설명에 나온 지명을 지도에서 확인한 자리."
         } else if point.source == "공개포인트" {
             place += " 공개 포인트 정보에 있던 자리."
         } else {

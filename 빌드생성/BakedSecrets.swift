@@ -4,4 +4,5 @@ enum BakedSecrets {
     static let gemini = ""
     static let dataGoKr = ""
     static let khoaHaereum = ""
+    static let youtube = ""
 }

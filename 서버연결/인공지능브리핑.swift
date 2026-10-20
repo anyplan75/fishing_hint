@@ -26,6 +26,7 @@ enum BriefingClient {
         guard !key.isEmpty, !script.isEmpty else { throw BriefingError.missingKey }
         let instruction = """
         너는 기준점 일대의 공개 자료만 읽는다.
+        공개 글, 유튜브 공개 영상의 제목과 설명, 공개 포인트만 본다.
         낚시 글로 괜찮은 포인트가 언급되거나, 공개 포인트 정보가 낚시 자리로 보이면 그것만 고른다.
         자료에 없는 장소, 좌표, 어종, 조황, 날씨, 물때는 만들지 마라.
         위도, 경도, 숫자의 좌표는 절대 쓰지 마라.
@@ -106,7 +107,11 @@ enum BriefingClient {
         let body: [String: Any] = [
             "systemInstruction": ["parts": [["text": instruction]]],
             "contents": [["role": "user", "parts": [["text": script]]]],
-            "generationConfig": ["temperature": 0.3, "maxOutputTokens": maxTokens],
+            "generationConfig": [
+                "temperature": 0.2,
+                "maxOutputTokens": maxTokens,
+                "thinkingConfig": ["thinkingBudget": 0],
+            ],
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -117,7 +122,10 @@ enum BriefingClient {
         let candidates = object?["candidates"] as? [[String: Any]]
         let content = candidates?.first?["content"] as? [String: Any]
         let parts = content?["parts"] as? [[String: Any]]
-        let text = parts?.compactMap { $0["text"] as? String }.joined(separator: "\n") ?? ""
+        let text = parts?.compactMap { part -> String? in
+            if part["thought"] as? Bool == true { return nil }
+            return part["text"] as? String
+        }.joined(separator: "\n") ?? ""
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw BriefingError.empty }
         return trimmed
@@ -158,6 +166,7 @@ enum BriefingClient {
             for raw in body.split(separator: "\n", omittingEmptySubsequences: false) {
                 let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                     .replacingOccurrences(of: "*", with: "")
+                    .replacingOccurrences(of: "：", with: ":")
                 if line.hasPrefix("이름:") {
                     name = cleaned(line, prefix: "이름:")
                 } else if line.hasPrefix("근거:") {

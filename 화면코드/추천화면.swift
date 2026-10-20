@@ -65,7 +65,7 @@ struct RecommendScreen: View {
 
     private var planPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 그 일대 공개 글과 공개 포인트를 읽고, 위치를 정한 자리만 받은 날씨·물때로 최대 10곳을 줄 세웁니다.")
+            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 그 일대 공개 글, 지역 이름으로 찾은 유튜브 공개 영상, 공개 포인트를 읽고, 위치를 정한 자리만 받은 날씨·물때로 최대 10곳을 줄 세웁니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             DatePicker("날짜", selection: $day, displayedComponents: .date)
@@ -96,7 +96,7 @@ struct RecommendScreen: View {
 
     private var nowPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 현재 위치 한 점입니다. 그 일대 공개 글과 공개 포인트를 읽고, 위치를 정한 자리만 지금부터 6시간의 받은 날씨·물때로 최대 3곳을 줄 세웁니다.")
+            Text("기준은 현재 위치 한 점입니다. 그 일대 공개 글, 지역 이름으로 찾은 유튜브 공개 영상, 공개 포인트를 읽고, 위치를 정한 자리만 지금부터 6시간의 받은 날씨·물때로 최대 3곳을 줄 세웁니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             Button(store.recommendBusy ? "계산 중" : "지금 3곳 찾기") { store.recommendNow() }
@@ -213,6 +213,14 @@ struct RecommendScreen: View {
 struct PickRow: View {
     var pick: SpotPick
 
+    private var placeLine: String {
+        switch pick.point.source {
+        case "공개글": return "공개 글에서 확인"
+        case "유튜브": return "유튜브에서 확인"
+        default: return pick.point.place.title
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -232,7 +240,7 @@ struct PickRow: View {
             HStack {
                 Text(FieldFormat.distance(pick.distanceKm))
                 Text(FieldFormat.money(pick.costWon))
-                Text(pick.point.source == "공개글" ? "공개 글에서 확인" : pick.point.place.title)
+                Text(placeLine)
             }
             .font(.caption)
             .foregroundStyle(FieldColor.muted)

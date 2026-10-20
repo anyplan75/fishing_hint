@@ -73,18 +73,21 @@ final class AppStore: ObservableObject {
     @Published var dataGoKrKey = ""
     /// 바다해도만 씁니다. 조석예보 키와 섞지 않습니다.
     @Published var haereumKey = ""
+    /// 유튜브 공개 영상 검색만 씁니다. 로그인이나 비공개 영상은 보지 않습니다.
+    @Published var youtubeKey = ""
     @Published var planPicks: [SpotPick] = []
     @Published var nowPicks: [SpotPick] = []
     @Published var shorePicks: [SpotPick] = []
     @Published var skinPicks: [SpotPick] = []
-    @Published var planMessage = "기준점 일대의 공개 글을 읽어, 위치를 정한 자리만 최대 10곳 줄 세웁니다."
-    @Published var nowMessage = "현재 위치 일대의 공개 글을 읽어, 지금부터 6시간 안에서 최대 3곳을 줄 세웁니다."
+    @Published var planMessage = "기준점 일대의 공개 글과 유튜브 공개 영상을 읽어, 위치를 정한 자리만 최대 10곳 줄 세웁니다."
+    @Published var nowMessage = "현재 위치 일대의 공개 글과 유튜브 공개 영상을 읽어, 지금부터 6시간 안에서 최대 3곳을 줄 세웁니다."
     @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 주간과 야간을 고른 뒤 갯가와 수중을 나눠 보여 줍니다."
     @Published var recommendBusy = false
     @Published var selectedPickId: String?
     @Published var mapLink = LinkLine.absent("지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.")
     @Published var aiLink = LinkLine.absent("인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
     @Published var tideLink = LinkLine.absent("조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
+    @Published var youtubeLink = LinkLine.absent("유튜브 없음. 비밀 파일에 YOUTUBE_API_KEY 가 없습니다.")
     @Published var savedTimes: [String: SavedSpotTimes] = [:]
     @Published var savedTimesNote = "저장한 자리의 낚시 시간과 해루질 시간을 받은 예보로 계산합니다."
 
@@ -111,6 +114,7 @@ final class AppStore: ObservableObject {
         geminiKey = secrets.gemini
         dataGoKrKey = secrets.dataGoKr
         haereumKey = secrets.haereum
+        youtubeKey = secrets.youtube
         locator.onFix = { [weak self] coordinate in
             self?.applyFix(coordinate)
         }
@@ -607,7 +611,7 @@ final class AppStore: ObservableObject {
         let generation = recommendGen
         recommendBusy = true
         let waiting = mentions
-            ? "기준점 일대의 공개 글과 공개 포인트를 읽는 중"
+            ? "기준점 일대의 공개 글과 유튜브 공개 영상을 읽는 중"
             : "주변 자리와 물때, 수온을 계산하는 중"
         writeRecommendMessage(waiting, slot: slot)
         Task {
@@ -717,17 +721,21 @@ final class AppStore: ObservableObject {
             let labels = await nameCall
             let anchorName = labels.first { PublicNearby.canFilter($0) } ?? labels.first ?? center.title
             let notes = PublicNearby.keep(bundle.notes, anchor: labels.joined(separator: " "))
+            let region = labels.filter { PublicNearby.canFilter($0) }.min { $0.count < $1.count } ?? anchorName
+            let videos = await YouTubePublicClient.search(region: region, apiKey: youtubeKey)
+            noteYouTube(fetched: !videos.isEmpty)
             let known = found.compactMap { point -> MentionFinder.KnownPoint? in
                 let away = Geo.kilometers(center.lat, center.lon, point.latitude, point.longitude)
                 guard away <= center.radius + 0.3 else { return nil }
                 return MentionFinder.KnownPoint(point: point, distanceKm: away)
             }
+            let reading = Array(notes.prefix(16)) + videos
             let outcome = await MentionFinder.find(
                 anchorName: anchorName,
                 latitude: center.lat,
                 longitude: center.lon,
                 radiusKm: center.radius,
-                notes: notes,
+                notes: reading,
                 known: known,
                 mapboxToken: mapboxToken,
                 geminiKey: geminiKey
@@ -974,6 +982,18 @@ final class AppStore: ObservableObject {
         mapLink = linkForKey(mapboxToken, emptyReason: "지도 없음. 비밀 파일에 MAPBOX_ACCESS_TOKEN 이 없습니다.", waiting: "지도 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: mapLink)
         aiLink = linkForKey(geminiKey, emptyReason: "인공지능 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.", waiting: "인공지능 없음. 암호는 있으나 아직 호출하지 않았습니다.", current: aiLink)
         tideLink = linkForKey(dataGoKrKey, emptyReason: "조석 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.", waiting: "조석 없음. 인증키는 있으나 아직 호출하지 않았습니다.", current: tideLink)
+        youtubeLink = linkForKey(youtubeKey, emptyReason: "유튜브 없음. 비밀 파일에 YOUTUBE_API_KEY 가 없습니다.", waiting: "유튜브 없음. 키는 있으나 아직 호출하지 않았습니다.", current: youtubeLink)
+    }
+
+    private func noteYouTube(fetched: Bool) {
+        let key = youtubeKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            youtubeLink = .absent("유튜브 없음. 비밀 파일에 YOUTUBE_API_KEY 가 없습니다.")
+            return
+        }
+        youtubeLink = fetched
+            ? .connected
+            : .absent("유튜브 없음. 이 지역 공개 영상을 가져오지 못했습니다.")
     }
 
     private func linkForKey(_ raw: String, emptyReason: String, waiting: String, current: LinkLine) -> LinkLine {

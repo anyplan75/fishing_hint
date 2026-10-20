@@ -27,13 +27,15 @@ enum MentionFinder {
     ) async -> Outcome {
         let localNotes = Array(notes.prefix(24))
         let localKnown = Array(known.prefix(20))
+        let posts = localNotes.filter { $0.sourceName != "유튜브" }
+        let videos = localNotes.filter { $0.sourceName == "유튜브" }
         let area = anchorName.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = area.isEmpty ? "기준점" : area
-        if localNotes.isEmpty && localKnown.isEmpty {
+        if posts.isEmpty && videos.isEmpty && localKnown.isEmpty {
             return Outcome(
                 points: [],
                 intro: "",
-                failure: "\(title) 일대에서 읽을 공개 글과 공개 포인트가 없습니다. 없는 자리는 만들지 않았습니다."
+                failure: "이 근처에서 읽을 공개 글이 없습니다."
             )
         }
         let key = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -45,7 +47,7 @@ enum MentionFinder {
             )
         }
         let corpus = corpusText(notes: localNotes, known: localKnown)
-        let script = prompt(anchorName: title, radiusKm: radiusKm, notes: localNotes, known: localKnown)
+        let script = prompt(anchorName: title, radiusKm: radiusKm, posts: posts, videos: videos, known: localKnown)
         let drafts: [MentionDraft]
         do {
             drafts = try await BriefingClient.readMentions(script: script, apiKey: key)
@@ -69,6 +71,7 @@ enum MentionFinder {
             if let point = await resolve(
                 draft,
                 corpus: corpus,
+                videos: videos,
                 known: localKnown,
                 latitude: latitude,
                 longitude: longitude,
@@ -88,26 +91,39 @@ enum MentionFinder {
                 failure: "언급된 자리의 위치를 기준점 반경 안에서 확인하지 못했습니다. 못 정한 글은 넣지 않았습니다."
             )
         }
-        var intro = "\(title) 일대의 공개 글 \(localNotes.count)건과 공개 포인트 \(localKnown.count)곳을 읽고, 위치를 정한 \(resolved.count)곳만 받은 날씨·물때로 봤습니다."
+        var intro = "\(title) 일대의 공개 글 \(posts.count)건, 유튜브 공개 영상 \(videos.count)건, 공개 포인트 \(localKnown.count)곳을 읽고, 위치를 정한 \(resolved.count)곳만 받은 날씨·물때로 봤습니다."
         if missed > 0 {
             intro += " 위치를 못 정한 \(missed)건은 빼 두었습니다."
         }
         return Outcome(points: resolved, intro: intro, failure: nil)
     }
 
-    private static func prompt(anchorName: String, radiusKm: Double, notes: [PublicFishingNote], known: [KnownPoint]) -> String {
+    private static func prompt(
+        anchorName: String,
+        radiusKm: Double,
+        posts: [PublicFishingNote],
+        videos: [PublicFishingNote],
+        known: [KnownPoint]
+    ) -> String {
         var lines = [
             "기준점: \(anchorName)",
             "반경: \(Int(radiusKm))km",
             "공개 글:",
         ]
-        if notes.isEmpty {
+        if posts.isEmpty {
             lines.append("- 없음")
         }
-        for note in notes {
+        for note in posts {
             let place = note.placeLabel.isEmpty ? "지역 없음" : note.placeLabel
             let summary = String(note.summary.prefix(160))
             lines.append("- \(place) | \(summary)")
+        }
+        lines.append("유튜브 공개 영상:")
+        if videos.isEmpty {
+            lines.append("- 없음")
+        }
+        for note in videos {
+            lines.append("- \(String(note.summary.prefix(160)))")
         }
         lines.append("공개 포인트:")
         if known.isEmpty {
@@ -129,6 +145,7 @@ enum MentionFinder {
     private static func resolve(
         _ draft: MentionDraft,
         corpus: String,
+        videos: [PublicFishingNote],
         known: [KnownPoint],
         latitude: Double,
         longitude: Double,
@@ -156,6 +173,7 @@ enum MentionFinder {
             .min { $0.1 < $1.1 }
         guard let chosen = near else { return nil }
         let name = placeAppears(draft.name, in: corpus) ? draft.name : place
+        let fromVideo = videos.contains { $0.summary.contains(place) }
         return FishingPoint(
             id: "mention-\(stableID(place, chosen.0.latitude, chosen.0.longitude))",
             name: name,
@@ -163,7 +181,7 @@ enum MentionFinder {
             longitude: chosen.0.longitude,
             place: .custom,
             water: .unknown,
-            source: "공개글",
+            source: fromVideo ? "유튜브" : "공개글",
             bottom: "",
             targetMemo: "",
             measuredTempC: nil,

@@ -61,6 +61,7 @@ write_let() {
   write_let gemini GEMINI_API_KEY
   write_let dataGoKr DATA_GO_KR_SERVICE_KEY
   write_let khoaHaereum KHOA_HAEREUM_KEY
+  write_let youtube YOUTUBE_API_KEY
   printf '%s\n' "}"
 } > "${OUT}"
 

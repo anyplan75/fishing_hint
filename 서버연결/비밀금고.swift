@@ -9,6 +9,8 @@ struct SecretPair {
     var dataGoKr: String
     /// 바다해도(해어름)만 읽는 키입니다. 조석예보 키와 다릅니다.
     var haereum: String
+    /// 유튜브 공개 영상 검색만 읽는 키입니다.
+    var youtube: String
 }
 
 enum SecretVault {
@@ -17,7 +19,8 @@ enum SecretVault {
             mapbox: BakedSecrets.mapbox,
             gemini: BakedSecrets.gemini,
             dataGoKr: BakedSecrets.dataGoKr,
-            haereum: BakedSecrets.khoaHaereum
+            haereum: BakedSecrets.khoaHaereum,
+            youtube: BakedSecrets.youtube
         )
     }
 }
