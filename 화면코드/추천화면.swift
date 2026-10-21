@@ -66,7 +66,7 @@ struct RecommendScreen: View {
 
     private var planPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("중심은 지도에 찍은 자리입니다. 핀이 없으면 현재 위치입니다. 반경은 지도에서 고른 \(Int(store.radiusKm))km와 같습니다. 그 밖은 넣지 않습니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 검색에 없는 자리는 만들지 않습니다. 최대 10곳입니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
+            Text("중심은 이름을 정해 저장한 자리입니다. 그 자리가 없으면 현재 위치입니다. 반경은 지도에서 고른 \(Int(store.radiusKm))km와 같습니다. 그 밖은 넣지 않습니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 검색에 없는 자리는 만들지 않습니다. 최대 10곳입니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             DatePicker("날짜", selection: $day, displayedComponents: .date)
@@ -105,7 +105,7 @@ struct RecommendScreen: View {
 
     private var nowPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("중심은 지도에 찍은 자리입니다. 핀이 없으면 현재 위치입니다. 반경은 지도에서 고른 \(Int(store.radiusKm))km와 같습니다. 그 밖은 넣지 않습니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 검색에 없는 자리는 만들지 않습니다. 최대 3곳입니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
+            Text("중심은 이름을 정해 저장한 자리입니다. 그 자리가 없으면 현재 위치입니다. 반경은 지도에서 고른 \(Int(store.radiusKm))km와 같습니다. 그 밖은 넣지 않습니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 검색에 없는 자리는 만들지 않습니다. 최대 3곳입니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             Button(store.recommendBusy ? "계산 중" : "지금 3곳 찾기") { store.recommendNow() }

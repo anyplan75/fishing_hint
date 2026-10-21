@@ -317,7 +317,7 @@ struct NameSaveSheet: View {
     var body: some View {
         NavigationView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("이 자리의 이름을 적으세요. 저장하면 내 포인트 목록에 이 이름이 남습니다. 이름을 비우면 저장하지 않습니다.")
+                Text("이 자리의 이름을 적으세요. 저장하면 내 포인트 목록에 이 이름이 남고, 바로 물때와 수온을 계산합니다. 이름을 비우거나 취소하면 저장하지 않고 핀도 남기지 않습니다.")
                     .font(.subheadline)
                     .foregroundStyle(FieldColor.muted)
                 TextField("장소 이름", text: $name)
@@ -341,7 +341,10 @@ struct NameSaveSheet: View {
             .navigationTitle("이름 정하고 저장")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("취소") { dismiss() }
+                    Button("취소") {
+                        store.cancelPlaceName()
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("저장") { storeName() }

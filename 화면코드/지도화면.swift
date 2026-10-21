@@ -1,6 +1,7 @@
 import SwiftUI
 
-// 지도가 화면의 대부분입니다. 장소 이름, 검색 결과, 경로 문구, 분석은 자리를 눌렀을 때만 나옵니다.
+// 지도가 화면의 대부분입니다. 왼쪽 클릭과 드래그는 지도를 옮길 때만 씁니다.
+// 장소 저장은 오른쪽 클릭이나 길게 누르기에서 이름을 물은 뒤에만 합니다.
 
 struct MapScreen: View {
     @EnvironmentObject private var store: AppStore
@@ -15,6 +16,12 @@ struct MapScreen: View {
                 VStack(spacing: 8) {
                     searchBar
                     radiusBar
+                    if !store.searchHits.isEmpty && !infoOpen {
+                        searchRow
+                            .padding(8)
+                            .background(FieldColor.ink.opacity(0.92))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
                     Spacer(minLength: 0)
                         .allowsHitTesting(false)
                     if infoOpen {
@@ -27,7 +34,7 @@ struct MapScreen: View {
             }
         }
         .background(FieldColor.ink)
-        .sheet(item: $store.savePrompt) { prompt in
+        .sheet(item: $store.savePrompt, onDismiss: { store.noteNamePromptClosed() }) { prompt in
             NameSaveSheet(point: prompt.point)
         }
     }
@@ -50,14 +57,10 @@ struct MapScreen: View {
                     fitToken: store.mapFit,
                     route: store.routeLine,
                     pins: pins,
-                    onTap: { lat, lon in
-                        infoOpen = true
-                        store.dropSpot(latitude: lat, longitude: lon)
+                    onSave: { lat, lon in
+                        store.askPlaceName(latitude: lat, longitude: lon)
                     },
-                    onSelect: { id in
-                        infoOpen = true
-                        store.inspect(id)
-                    },
+                    onSelect: { _ in },
                     onMove: { lat, lon in store.rememberMap(latitude: lat, longitude: lon) },
                     onMap: { store.noteMap(ok: $0) }
                 )
@@ -77,16 +80,6 @@ struct MapScreen: View {
                 score: briefing.score,
                 selected: briefing.point.id == store.selectedPointId,
                 label: fishingLabel(name: briefing.point.name, score: briefing.score)
-            ))
-        }
-        if let tapped = store.tapped, tapped.source == "찍은자리", !items.contains(where: { $0.id == tapped.id }) {
-            items.append(MapPin(
-                id: tapped.id,
-                name: tapped.name,
-                latitude: tapped.latitude,
-                longitude: tapped.longitude,
-                score: -1,
-                selected: false
             ))
         }
         for point in store.myPoints where point.isMine && !items.contains(where: { $0.id == point.id }) {
@@ -175,7 +168,10 @@ struct MapScreen: View {
                     .onSubmit { store.searchPlaces(query) }
                 Button("찾기") { store.searchPlaces(query) }
                     .buttonStyle(FieldButton(fill: FieldColor.sea))
-                Button(store.busy ? "계산 중" : "분석") { store.refresh() }
+                Button(store.busy ? "계산 중" : "분석") {
+                    infoOpen = true
+                    store.refresh()
+                }
                     .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
                     .disabled(store.busy)
                 Button("내 위치") { store.focusOnMe() }
@@ -285,6 +281,7 @@ struct MapScreen: View {
                     HStack(spacing: 8) {
                         ForEach(store.searchHits) { hit in
                             Button(hit.title) {
+                                infoOpen = true
                                 store.openSearch(hit.id)
                                 query = hit.title
                             }

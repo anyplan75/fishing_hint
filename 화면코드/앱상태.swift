@@ -61,6 +61,8 @@ final class AppStore: ObservableObject {
     @Published var tapped: FishingPoint?
     /// 이름을 적어 내 포인트로 저장할 자리입니다. 비우면 저장하지 않습니다.
     @Published var savePrompt: SavePrompt?
+    /// 이름 창이 저장으로 닫혔는지 구분합니다. 취소로 닫히면 핀을 남기지 않습니다.
+    private var keptName = false
     @Published var briefings: [String: PointBriefing] = [:]
     /// 자리를 열었는데 물때·수온을 못 받으면 계산 중 대신 이 짧은 이유를 보여 줍니다.
     @Published var detailMiss: [String: String] = [:]
@@ -100,8 +102,8 @@ final class AppStore: ObservableObject {
     @Published var nowPicks: [SpotPick] = []
     @Published var shorePicks: [SpotPick] = []
     @Published var skinPicks: [SpotPick] = []
-    @Published var planMessage = "지도에 찍은 자리, 핀이 없으면 현재 위치를 중심으로 고른 반경 안만 읽어 최대 10곳을 줄 세웁니다."
-    @Published var nowMessage = "지도에 찍은 자리, 핀이 없으면 현재 위치를 중심으로 고른 반경 안만 읽어 최대 3곳을 줄 세웁니다."
+    @Published var planMessage = "이름을 정해 저장한 자리, 없으면 현재 위치를 중심으로 고른 반경 안만 읽어 최대 10곳을 줄 세웁니다."
+    @Published var nowMessage = "이름을 정해 저장한 자리, 없으면 현재 위치를 중심으로 고른 반경 안만 읽어 최대 3곳을 줄 세웁니다."
     @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 수중은 스킨스쿠버지수 포인트만 봅니다."
     @Published var recommendBusy = false
     @Published var selectedPickId: String?
@@ -136,7 +138,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// 반경 원의 중심입니다. 지도를 찍어 둔 자리가 있으면 그 지점이고, 핀이 없으면 현재 위치입니다.
+    /// 반경 원의 중심입니다. 이름을 정해 저장한 자리가 있으면 그 지점이고, 없으면 현재 위치입니다.
     var circleAnchor: (latitude: Double, longitude: Double)? {
         if let tapped {
             return (tapped.latitude, tapped.longitude)
@@ -264,7 +266,7 @@ final class AppStore: ObservableObject {
             guard gen == self.refreshGen else { return }
             busy = false
             if ranked.isEmpty {
-                statusText = "이 반경의 공개 자리가 없습니다. 지도를 누르면 자리만 남고, 분석을 누르면 계산합니다."
+                statusText = "이 반경의 공개 자리가 없습니다. 분석은 분석 버튼으로 계산합니다."
             } else {
                 statusText = "\(ranked.count)곳을 조건 점수로 줄 세웠습니다."
             }
@@ -272,11 +274,16 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// 지도를 누르면 저장하지 않은 자리 하나만 남깁니다. 물때와 날씨는 분석을 누를 때 계산합니다.
-    func dropSpot(latitude: Double, longitude: Double) {
+    /// 오른쪽 클릭이나 길게 누르기에서 이름만 묻습니다.
+    /// 이름을 정하기 전에는 핀을 만들지 않고, 분석도 시작하지 않습니다.
+    func askPlaceName(latitude: Double, longitude: Double) {
+        clearUnsavedTap()
+        if tapped?.source == "찍은자리" {
+            tapped = nil
+        }
         let point = FishingPoint(
-            id: String(format: "tap-%.4f-%.4f", latitude, longitude),
-            name: "찍은 자리",
+            id: String(format: "ask-%.5f-%.5f", latitude, longitude),
+            name: "",
             latitude: latitude,
             longitude: longitude,
             place: .custom,
@@ -287,10 +294,28 @@ final class AppStore: ObservableObject {
             measuredTempC: nil,
             memo: ""
         )
-        clearUnsavedTap()
-        tapped = point
         savePrompt = SavePrompt(point: point)
-        statusText = "자리 이름을 적고 저장하세요. 이름을 비우면 저장하지 않습니다."
+        statusText = "자리 이름을 적고 저장하세요. 이름을 비우면 저장하지 않고 핀도 남기지 않습니다."
+    }
+
+    /// 이름 창을 저장 없이 닫으면 핀을 남기지 않습니다.
+    func cancelPlaceName() {
+        keptName = false
+        savePrompt = nil
+        statusText = "이름을 정하지 않아 저장하지 않았습니다."
+    }
+
+    /// 이름 창이 닫힌 뒤입니다. 저장하지 않았으면 핀이 없고, 안내 문구만 바꿉니다.
+    func noteNamePromptClosed() {
+        if keptName {
+            keptName = false
+            return
+        }
+        if savePrompt != nil { return }
+        let asking = "자리 이름을 적고 저장하세요. 이름을 비우면 저장하지 않고 핀도 남기지 않습니다."
+        if statusText == asking {
+            statusText = "이름을 정하지 않아 저장하지 않았습니다."
+        }
     }
 
     func askSaveName(for point: FishingPoint) {
@@ -307,9 +332,11 @@ final class AppStore: ObservableObject {
         }
         var named = point
         named.name = trimmed
-        saveMine(from: named)
+        keptName = true
         savePrompt = nil
-        statusText = "\(trimmed) 을 내 포인트에 저장했습니다."
+        let saved = saveMine(from: named)
+        tapped = saved
+        statusText = "\(trimmed) 을 내 포인트에 저장했습니다. 물때와 수온을 계산합니다."
         return true
     }
 
@@ -578,7 +605,8 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func saveMine(from point: FishingPoint) {
+    @discardableResult
+    func saveMine(from point: FishingPoint) -> FishingPoint {
         var copy = point
         if copy.source != "내포인트" {
             copy.id = "mine-\(UUID().uuidString)"
@@ -600,6 +628,7 @@ final class AppStore: ObservableObject {
         if briefings[copy.id] == nil {
             fillBriefing(for: copy)
         }
+        return copy
     }
 
     func updateMine(_ point: FishingPoint) {
@@ -1124,7 +1153,7 @@ final class AppStore: ObservableObject {
     /// 낚시 계획과 바로가자가 지도 원과 같이 쓰는 중심입니다.
     private func circleCenter() -> (lat: Double, lon: Double, radius: Double, title: String)? {
         guard let anchor = circleAnchor else { return nil }
-        let who = tapped == nil ? "현재 위치" : "찍은 자리"
+        let who = tapped == nil ? "현재 위치" : "저장한 자리"
         return (anchor.latitude, anchor.longitude, radiusKm, "\(who) 반경 \(Int(radiusKm))km")
     }
 

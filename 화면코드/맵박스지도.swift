@@ -71,7 +71,7 @@ struct MapboxMapView: View {
     var fitToken: Int
     var route: [[Double]]
     var pins: [MapPin]
-    var onTap: (Double, Double) -> Void
+    var onSave: (Double, Double) -> Void
     var onSelect: (String) -> Void
     var onMove: (Double, Double) -> Void
     var onMap: (Bool) -> Void
@@ -90,7 +90,7 @@ struct MapboxMapView: View {
             fitToken: fitToken,
             route: route,
             pins: pins,
-            onTap: onTap,
+            onSave: onSave,
             onSelect: onSelect,
             onMove: onMove,
             onMap: onMap
@@ -112,13 +112,13 @@ private struct MapboxWebView: UIViewRepresentable {
     var fitToken: Int
     var route: [[Double]]
     var pins: [MapPin]
-    var onTap: (Double, Double) -> Void
+    var onSave: (Double, Double) -> Void
     var onSelect: (String) -> Void
     var onMove: (Double, Double) -> Void
     var onMap: (Bool) -> Void
 
     func makeCoordinator() -> MapCoordinator {
-        MapCoordinator(onTap: onTap, onSelect: onSelect, onMove: onMove, onMap: onMap)
+        MapCoordinator(onSave: onSave, onSelect: onSelect, onMove: onMove, onMap: onMap)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -131,7 +131,7 @@ private struct MapboxWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         (webView as? MapGestureWebView)?.releasePageGestures()
-        context.coordinator.onTap = onTap
+        context.coordinator.onSave = onSave
         context.coordinator.onSelect = onSelect
         context.coordinator.onMove = onMove
         context.coordinator.onMap = onMap
@@ -156,13 +156,13 @@ private struct MapboxWebView: NSViewRepresentable {
     var fitToken: Int
     var route: [[Double]]
     var pins: [MapPin]
-    var onTap: (Double, Double) -> Void
+    var onSave: (Double, Double) -> Void
     var onSelect: (String) -> Void
     var onMove: (Double, Double) -> Void
     var onMap: (Bool) -> Void
 
     func makeCoordinator() -> MapCoordinator {
-        MapCoordinator(onTap: onTap, onSelect: onSelect, onMove: onMove, onMap: onMap)
+        MapCoordinator(onSave: onSave, onSelect: onSelect, onMove: onMove, onMap: onMap)
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -174,7 +174,7 @@ private struct MapboxWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        context.coordinator.onTap = onTap
+        context.coordinator.onSave = onSave
         context.coordinator.onSelect = onSelect
         context.coordinator.onMove = onMove
         context.coordinator.onMap = onMap
@@ -246,7 +246,7 @@ private struct MapState {
 }
 
 final class MapCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-    var onTap: (Double, Double) -> Void
+    var onSave: (Double, Double) -> Void
     var onSelect: (String) -> Void
     var onMove: (Double, Double) -> Void
     var onMap: (Bool) -> Void
@@ -256,8 +256,8 @@ final class MapCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandl
     private var lastJSON = ""
     private var lastFly = -1
 
-    init(onTap: @escaping (Double, Double) -> Void, onSelect: @escaping (String) -> Void, onMove: @escaping (Double, Double) -> Void, onMap: @escaping (Bool) -> Void) {
-        self.onTap = onTap
+    init(onSave: @escaping (Double, Double) -> Void, onSelect: @escaping (String) -> Void, onMove: @escaping (Double, Double) -> Void, onMap: @escaping (Bool) -> Void) {
+        self.onSave = onSave
         self.onSelect = onSelect
         self.onMove = onMove
         self.onMap = onMap
@@ -288,8 +288,8 @@ final class MapCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandl
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
-        if type == "tap", let lat = Self.number(body["lat"]), let lon = Self.number(body["lon"]) {
-            DispatchQueue.main.async { self.onTap(lat, lon) }
+        if type == "save", let lat = Self.number(body["lat"]), let lon = Self.number(body["lon"]) {
+            DispatchQueue.main.async { self.onSave(lat, lon) }
         } else if type == "select", let id = body["id"] as? String {
             DispatchQueue.main.async { self.onSelect(id) }
         } else if type == "move", let lat = Self.number(body["lat"]), let lon = Self.number(body["lon"]) {
@@ -315,7 +315,7 @@ private enum MapPage {
     <link href="https://api.mapbox.com/mapbox-gl-js/v3.17.0/mapbox-gl.css" rel="stylesheet">
     <script src="https://api.mapbox.com/mapbox-gl-js/v3.17.0/mapbox-gl.js"></script>
     <style>
-      html, body, #map { margin:0; height:100%; background:#071018; touch-action:none; }
+      html, body, #map { margin:0; height:100%; background:#071018; touch-action:none; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
       .mapboxgl-ctrl-attrib { font-size:10px; }
     </style>
     </head>
@@ -373,6 +373,7 @@ private enum MapPage {
         center:[lon, lat],
         zoom:zoom,
         dragPan:true,
+        dragRotate:false,
         scrollZoom:true,
         touchZoomRotate:true,
         doubleClickZoom:true
@@ -427,22 +428,67 @@ private enum MapPage {
         });
         map.addSource('user', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
         map.addLayer({ id:'user', type:'circle', source:'user', paint:{ 'circle-radius':7, 'circle-color':'#ffffff', 'circle-stroke-width':3, 'circle-stroke-color':'#1c8c86' } });
-        map.on('click', 'pins', (event) => {
-          const feature = event.features && event.features[0];
-          if (!feature) return;
-          event.originalEvent && event.originalEvent.stopPropagation && event.originalEvent.preventDefault();
-          post({ type:'select', id: feature.properties.id });
+        let holdTimer = null;
+        let holdOrigin = null;
+        let holdLngLat = null;
+        let holdStarted = 0;
+        let lastSave = 0;
+        function askSave(lngLat) {
+          if (!lngLat) return;
+          const now = Date.now();
+          if (now - lastSave < 700) return;
+          lastSave = now;
+          post({ type:'save', lat: lngLat.lat, lon: lngLat.lng });
+        }
+        function clearHold() {
+          if (holdTimer) clearTimeout(holdTimer);
+          holdTimer = null;
+          holdOrigin = null;
+          holdLngLat = null;
+          holdStarted = 0;
+        }
+        map.getCanvas().addEventListener('contextmenu', (event) => { event.preventDefault(); });
+        map.on('contextmenu', (event) => {
+          if (event.preventDefault) event.preventDefault();
+          const raw = event.originalEvent;
+          if (raw && raw.preventDefault) raw.preventDefault();
+          askSave(event.lngLat);
         });
-        map.on('click', 'pin-labels', (event) => {
-          const feature = event.features && event.features[0];
-          if (!feature) return;
-          event.originalEvent && event.originalEvent.stopPropagation && event.originalEvent.preventDefault();
-          post({ type:'select', id: feature.properties.id });
+        map.on('touchstart', (event) => {
+          const raw = event.originalEvent;
+          const touches = raw && raw.touches;
+          if (!touches || touches.length !== 1 || !event.lngLat || !event.point) {
+            clearHold();
+            return;
+          }
+          clearHold();
+          holdOrigin = { x: event.point.x, y: event.point.y };
+          holdLngLat = event.lngLat;
+          holdStarted = Date.now();
+          const lngLat = event.lngLat;
+          holdTimer = setTimeout(() => {
+            holdTimer = null;
+            holdOrigin = null;
+            holdLngLat = null;
+            holdStarted = 0;
+            askSave(lngLat);
+          }, 500);
         });
-        map.on('click', (event) => {
-          const hits = map.queryRenderedFeatures(event.point, { layers:['pins', 'pin-labels'] });
-          if (hits.length) return;
-          post({ type:'tap', lat: event.lngLat.lat, lon: event.lngLat.lng });
+        map.on('touchmove', (event) => {
+          if (!holdTimer || !holdOrigin || !event.point) return;
+          const raw = event.originalEvent;
+          const touches = raw && raw.touches;
+          if (touches && touches.length !== 1) { clearHold(); return; }
+          const dx = event.point.x - holdOrigin.x;
+          const dy = event.point.y - holdOrigin.y;
+          if (dx * dx + dy * dy > 256) clearHold();
+        });
+        map.on('touchend', () => { clearHold(); });
+        map.on('touchcancel', () => {
+          const lngLat = holdLngLat;
+          const elapsed = holdStarted ? Date.now() - holdStarted : 0;
+          clearHold();
+          if (elapsed >= 450 && lngLat) askSave(lngLat);
         });
         map.on('moveend', () => {
           const c = map.getCenter();

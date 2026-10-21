@@ -71,7 +71,7 @@ struct MyPointsView: View {
                     .font(.subheadline)
                     .foregroundStyle(FieldColor.wait)
                 if store.myPoints.isEmpty {
-                    Text("아직 없습니다. 지도나 추천에서 자리를 누른 뒤 이름을 적고 저장하세요. 이름을 비우면 여기에 나오지 않습니다.")
+                    Text("아직 없습니다. 지도에서 오른쪽을 클릭하거나 길게 누른 뒤 이름을 적고 저장하세요. 추천에서는 이름 정하고 저장을 누르세요. 이름을 비우면 여기에 나오지 않습니다.")
                         .padding(.top, 12)
                 }
                 ForEach(store.myPoints) { point in
