@@ -51,7 +51,8 @@ struct LinkLine: Equatable {
 final class AppStore: ObservableObject {
     @Published var mapboxToken = ""
     @Published var geminiKey = ""
-    @Published var radiusKm = 12.0
+    /// 지도 반경입니다. 저장한 값이 없으면 5km에서 시작하고, 고른 값은 남깁니다.
+    @Published var radiusKm = 5.0
     @Published var useMyLocation = true
     @Published var preferSpecies: [String] = []
     @Published var region: SavedRegion?
@@ -99,8 +100,8 @@ final class AppStore: ObservableObject {
     @Published var nowPicks: [SpotPick] = []
     @Published var shorePicks: [SpotPick] = []
     @Published var skinPicks: [SpotPick] = []
-    @Published var planMessage = "기준점 일대의 공개 글, 유튜브, 바다낚시지수, 전국낚시터를 읽어 최대 10곳을 줄 세웁니다."
-    @Published var nowMessage = "현재 위치 일대의 공개 글, 유튜브, 바다낚시지수, 전국낚시터를 읽어 최대 3곳을 줄 세웁니다."
+    @Published var planMessage = "지도에 찍은 자리, 핀이 없으면 현재 위치를 중심으로 고른 반경 안만 읽어 최대 10곳을 줄 세웁니다."
+    @Published var nowMessage = "지도에 찍은 자리, 핀이 없으면 현재 위치를 중심으로 고른 반경 안만 읽어 최대 3곳을 줄 세웁니다."
     @Published var gleanMessage = "해루질은 낚시 추천과 따로 봅니다. 수중은 스킨스쿠버지수 포인트만 봅니다."
     @Published var recommendBusy = false
     @Published var selectedPickId: String?
@@ -133,6 +134,21 @@ final class AppStore: ObservableObject {
             }
             return left.score > right.score
         }
+    }
+
+    /// 반경 원의 중심입니다. 지도를 찍어 둔 자리가 있으면 그 지점이고, 핀이 없으면 현재 위치입니다.
+    var circleAnchor: (latitude: Double, longitude: Double)? {
+        if let tapped {
+            return (tapped.latitude, tapped.longitude)
+        }
+        guard let userLat, let userLon else { return nil }
+        return (userLat, userLon)
+    }
+
+    /// 고른 반경 원 안인지 봅니다. 중심이 없으면 원 안이 아닙니다.
+    func isInsideCircle(latitude: Double, longitude: Double) -> Bool {
+        guard let anchor = circleAnchor else { return false }
+        return Geo.kilometers(anchor.latitude, anchor.longitude, latitude, longitude) <= radiusKm
     }
 
     func start() {
@@ -198,7 +214,7 @@ final class AppStore: ObservableObject {
             locationText = userLat == nil ? "현재 위치를 가져오는 중" : "현재 위치를 사용 중"
         case .denied, .restricted:
             locationText = "위치 권한이 꺼져 있습니다"
-            statusText = "지도를 옮긴 뒤 '이 지역 분석'을 누르세요."
+            statusText = "지도를 찍어 중심을 정하거나, 위치 권한을 허용하세요."
             if !didFirstFix && briefings.isEmpty && !busy {
                 refresh()
             }
@@ -210,10 +226,14 @@ final class AppStore: ObservableObject {
     }
 
     func refresh() {
+        guard let anchor = circleAnchor else {
+            statusText = "중심이 없습니다. 지도를 찍거나 위치 권한을 허용하세요."
+            return
+        }
         refreshGen += 1
         let gen = refreshGen
-        let lat = centerLat
-        let lon = centerLon
+        let lat = anchor.latitude
+        let lon = anchor.longitude
         let radius = radiusKm
         busy = true
         statusText = "주변 자리와 물때, 수온을 계산하는 중"
@@ -885,7 +905,7 @@ final class AppStore: ObservableObject {
         writeRecommendMessage(waiting, slot: slot)
         Task {
             let loaded = mentions
-                ? await self.loadMentionedContext(scope: scope, requireUser: requireUser, from: from, to: to)
+                ? await self.loadMentionedContext(from: from, to: to)
                 : await self.loadRecommendContext(scope: scope, requireUser: requireUser, from: from, to: to)
             guard generation == self.recommendGen else { return }
             switch loaded {
@@ -961,24 +981,22 @@ final class AppStore: ObservableObject {
 
     /// 낚시 계획과 바로가자만 씁니다. 미리 등록된 목록을 그대로 줄 세우지 않습니다.
     private func loadMentionedContext(
-        scope: RecommendScope,
-        requireUser: Bool,
         from: Date,
         to: Date
     ) async -> Result<RecommendContext, RecommendMessageError> {
-        guard let center = recommendCenter(scope: scope, requireUser: requireUser) else {
-            if requireUser || scope == .here {
-                return .failure(RecommendMessageError(message: "현재 위치가 없습니다. 위치 권한을 허용해 주세요."))
-            }
-            return .failure(RecommendMessageError(message: "저장된 지역이 없습니다. 지도에서 지역을 맞춘 뒤 이 지역 저장을 누르세요."))
+        guard let center = circleCenter() else {
+            return .failure(RecommendMessageError(message: "중심이 없습니다. 지도에서 자리를 찍거나 위치 권한을 허용해 주세요."))
         }
         let signature = String(format: "%.3f,%.3f,%.0f", center.lat, center.lon, center.radius)
         let remembered = mentionMemory
+        let cachedInside = remembered?.signature == signature
+            ? (remembered?.points.filter { Geo.kilometers(center.lat, center.lon, $0.latitude, $0.longitude) <= center.radius } ?? [])
+            : []
         let located: [FishingPoint]
         let intro: String
         let title: String
-        if let remembered, remembered.signature == signature, !remembered.points.isEmpty {
-            located = remembered.points
+        if let remembered, remembered.signature == signature, !cachedInside.isEmpty {
+            located = cachedInside
             intro = remembered.intro
             title = remembered.title
             googleSuggestHtml = remembered.suggestHtml
@@ -1035,6 +1053,9 @@ final class AppStore: ObservableObject {
             let merged = outcome.points + index.points + spots.points + web.points
             var kept: [FishingPoint] = []
             for point in merged {
+                if Geo.kilometers(center.lat, center.lon, point.latitude, point.longitude) > center.radius {
+                    continue
+                }
                 if kept.contains(where: { Geo.kilometers($0.latitude, $0.longitude, point.latitude, point.longitude) < 0.4 && $0.name == point.name }) {
                     continue
                 }
@@ -1098,6 +1119,13 @@ final class AppStore: ObservableObject {
         }
         guard let region else { return nil }
         return (region.latitude, region.longitude, region.radiusKm, "저장 지역 \(region.name) 반경 \(Int(region.radiusKm))km")
+    }
+
+    /// 낚시 계획과 바로가자가 지도 원과 같이 쓰는 중심입니다.
+    private func circleCenter() -> (lat: Double, lon: Double, radius: Double, title: String)? {
+        guard let anchor = circleAnchor else { return nil }
+        let who = tapped == nil ? "현재 위치" : "찍은 자리"
+        return (anchor.latitude, anchor.longitude, radiusKm, "\(who) 반경 \(Int(radiusKm))km")
     }
 
     /// 지도가 지금 쓰는 내 위치입니다. 좌표가 없으면 기본 지도 중심을 내 위치처럼 쓰지 않습니다.
@@ -1176,11 +1204,13 @@ final class AppStore: ObservableObject {
     }
 
     private func analyze(center: ConditionPack, latitude: Double, longitude: Double, generation: Int) async {
-        var points = nearby.filter { Geo.kilometers(latitude, longitude, $0.latitude, $0.longitude) <= radiusKm + 0.3 }
+        var points = nearby.filter { Geo.kilometers(latitude, longitude, $0.latitude, $0.longitude) <= radiusKm }
         for mine in myPoints where !points.contains(where: { $0.id == mine.id }) {
+            guard Geo.kilometers(latitude, longitude, mine.latitude, mine.longitude) <= radiusKm else { continue }
             points.append(mine)
         }
-        if let tapped, !points.contains(where: { $0.id == tapped.id }) {
+        if let tapped, !points.contains(where: { $0.id == tapped.id }),
+           Geo.kilometers(latitude, longitude, tapped.latitude, tapped.longitude) <= radiusKm {
             points.append(tapped)
         }
         let moon = MoonClock.info(on: Date(), longitude: longitude)

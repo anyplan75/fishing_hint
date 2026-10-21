@@ -14,6 +14,7 @@ struct MapScreen: View {
                     .frame(width: geo.size.width, height: geo.size.height)
                 VStack(spacing: 8) {
                     searchBar
+                    radiusBar
                     Spacer(minLength: 0)
                         .allowsHitTesting(false)
                     if infoOpen {
@@ -42,6 +43,8 @@ struct MapScreen: View {
                     longitude: store.centerLon,
                     userLat: store.userLat,
                     userLon: store.userLon,
+                    circleLat: store.circleAnchor?.latitude,
+                    circleLon: store.circleAnchor?.longitude,
                     radiusKm: store.radiusKm,
                     flyToken: store.flyToken,
                     fitToken: store.mapFit,
@@ -63,15 +66,18 @@ struct MapScreen: View {
     }
 
     private var pins: [MapPin] {
-        var items = store.ranked.map { briefing in
-            MapPin(
+        var items: [MapPin] = []
+        for briefing in store.ranked {
+            guard store.isInsideCircle(latitude: briefing.point.latitude, longitude: briefing.point.longitude) else { continue }
+            items.append(MapPin(
                 id: briefing.point.id,
                 name: briefing.point.name,
                 latitude: briefing.point.latitude,
                 longitude: briefing.point.longitude,
                 score: briefing.score,
-                selected: briefing.point.id == store.selectedPointId
-            )
+                selected: briefing.point.id == store.selectedPointId,
+                label: fishingLabel(name: briefing.point.name, score: briefing.score)
+            ))
         }
         if let tapped = store.tapped, tapped.source == "찍은자리", !items.contains(where: { $0.id == tapped.id }) {
             items.append(MapPin(
@@ -121,6 +127,12 @@ struct MapScreen: View {
         return items
     }
 
+    /// 검색으로 점수가 있는 낚시 핀만 이름과 성공률을 적습니다. 없는 성공률은 만들지 않습니다.
+    private func fishingLabel(name: String, score: Int) -> String {
+        guard score >= 0 else { return "" }
+        return "\(name)\n성공률 \(score)%"
+    }
+
     private var placeTitle: String {
         if store.savePrompt != nil, let tapped = store.tapped, !tapped.name.isEmpty {
             return tapped.name
@@ -132,6 +144,24 @@ struct MapScreen: View {
             return store.regionTitle
         }
         return "고른 자리"
+    }
+
+    /// 지도 위에 얇게 두는 반경 조절입니다. 분석 카드 안의 조절과 같은 값을 씁니다.
+    private var radiusBar: some View {
+        HStack(spacing: 8) {
+            Text("반경 \(Int(store.radiusKm))km")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(FieldColor.good)
+                .lineLimit(1)
+                .frame(width: 72, alignment: .leading)
+            Slider(value: $store.radiusKm, in: 3...30, step: 1, onEditingChanged: { editing in
+                if !editing { store.refresh() }
+            })
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(FieldColor.ink.opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var searchBar: some View {

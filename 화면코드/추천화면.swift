@@ -66,7 +66,7 @@ struct RecommendScreen: View {
 
     private var planPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 기준점 약 18km 안에서 위치를 정한 자리만 최대 10곳을 줄 세웁니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
+            Text("중심은 지도에 찍은 자리입니다. 핀이 없으면 현재 위치입니다. 반경은 지도에서 고른 \(Int(store.radiusKm))km와 같습니다. 그 밖은 넣지 않습니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 검색에 없는 자리는 만들지 않습니다. 최대 10곳입니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             DatePicker("날짜", selection: $day, displayedComponents: .date)
@@ -75,9 +75,14 @@ struct RecommendScreen: View {
             Text(endHour <= startHour ? "끝 시각이 시작보다 이르면 다음 날 그 시각까지 봅니다." : "끝 시각 전까지만 찾습니다. 0시부터 24시면 하루 전체입니다.")
                 .font(.caption)
                 .foregroundStyle(FieldColor.muted)
-            scopePicker
+            Text("반경 \(Int(store.radiusKm))km. 지도와 같은 값입니다.")
+                .font(.caption)
+                .foregroundStyle(FieldColor.muted)
+            Slider(value: $store.radiusKm, in: 3...30, step: 1, onEditingChanged: { editing in
+                if !editing { store.keepRadius() }
+            })
             Button(store.recommendBusy ? "계산 중" : "이 일정으로 10곳 찾기") {
-                store.recommendPlan(on: day, startHour: startHour, endHour: endHour, scope: scopeHere ? .here : .saved)
+                store.recommendPlan(on: day, startHour: startHour, endHour: endHour, scope: .here)
             }
             .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
             .disabled(store.recommendBusy)
@@ -100,7 +105,7 @@ struct RecommendScreen: View {
 
     private var nowPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 현재 위치 한 점입니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 기준점 약 18km 안에서 위치를 정한 자리만 최대 3곳을 줄 세웁니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
+            Text("중심은 지도에 찍은 자리입니다. 핀이 없으면 현재 위치입니다. 반경은 지도에서 고른 \(Int(store.radiusKm))km와 같습니다. 그 밖은 넣지 않습니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 검색에 없는 자리는 만들지 않습니다. 최대 3곳입니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             Button(store.recommendBusy ? "계산 중" : "지금 3곳 찾기") { store.recommendNow() }

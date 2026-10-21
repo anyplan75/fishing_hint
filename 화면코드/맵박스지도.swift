@@ -53,6 +53,8 @@ struct MapPin: Identifiable {
     var selected: Bool
     /// 식당, 숙소, 일반 검색 핀입니다. 비어 있으면 낚시 점수 핀입니다.
     var marker: String = ""
+    /// 원 안 낚시 핀에만 적습니다. 이름과 성공률입니다. 비어 있으면 글자를 그리지 않습니다.
+    var label: String = ""
 }
 
 struct MapboxMapView: View {
@@ -61,6 +63,9 @@ struct MapboxMapView: View {
     var longitude: Double
     var userLat: Double?
     var userLon: Double?
+    /// 반경 원의 중심입니다. 카메라 중심과 다릅니다. 없으면 원을 그리지 않습니다.
+    var circleLat: Double?
+    var circleLon: Double?
     var radiusKm: Double
     var flyToken: Int
     var fitToken: Int
@@ -78,6 +83,8 @@ struct MapboxMapView: View {
             longitude: longitude,
             userLat: userLat,
             userLon: userLon,
+            circleLat: circleLat,
+            circleLon: circleLon,
             radiusKm: radiusKm,
             flyToken: flyToken,
             fitToken: fitToken,
@@ -98,6 +105,8 @@ private struct MapboxWebView: UIViewRepresentable {
     var longitude: Double
     var userLat: Double?
     var userLon: Double?
+    var circleLat: Double?
+    var circleLon: Double?
     var radiusKm: Double
     var flyToken: Int
     var fitToken: Int
@@ -130,7 +139,7 @@ private struct MapboxWebView: UIViewRepresentable {
     }
 
     private func currentState() -> MapState {
-        MapState(token: token, latitude: latitude, longitude: longitude, userLat: userLat, userLon: userLon, radiusKm: radiusKm, flyToken: flyToken, fitToken: fitToken, route: route, pins: pins)
+        MapState(token: token, latitude: latitude, longitude: longitude, userLat: userLat, userLon: userLon, circleLat: circleLat, circleLon: circleLon, radiusKm: radiusKm, flyToken: flyToken, fitToken: fitToken, route: route, pins: pins)
     }
 }
 #else
@@ -140,6 +149,8 @@ private struct MapboxWebView: NSViewRepresentable {
     var longitude: Double
     var userLat: Double?
     var userLon: Double?
+    var circleLat: Double?
+    var circleLon: Double?
     var radiusKm: Double
     var flyToken: Int
     var fitToken: Int
@@ -171,7 +182,7 @@ private struct MapboxWebView: NSViewRepresentable {
     }
 
     private func currentState() -> MapState {
-        MapState(token: token, latitude: latitude, longitude: longitude, userLat: userLat, userLon: userLon, radiusKm: radiusKm, flyToken: flyToken, fitToken: fitToken, route: route, pins: pins)
+        MapState(token: token, latitude: latitude, longitude: longitude, userLat: userLat, userLon: userLon, circleLat: circleLat, circleLon: circleLon, radiusKm: radiusKm, flyToken: flyToken, fitToken: fitToken, route: route, pins: pins)
     }
 }
 #endif
@@ -182,6 +193,8 @@ private struct MapState {
     var longitude: Double
     var userLat: Double?
     var userLon: Double?
+    var circleLat: Double?
+    var circleLon: Double?
     var radiusKm: Double
     var flyToken: Int
     var fitToken: Int
@@ -204,6 +217,7 @@ private struct MapState {
                 "score": pin.score,
                 "selected": pin.selected,
                 "marker": pin.marker,
+                "label": pin.label,
             ])
         }
         var object: [String: Any] = [
@@ -220,6 +234,10 @@ private struct MapState {
         if let userLat, let userLon {
             object["userLat"] = userLat
             object["userLon"] = userLon
+        }
+        if let circleLat, let circleLon {
+            object["circleLat"] = circleLat
+            object["circleLon"] = circleLon
         }
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let text = String(data: data, encoding: .utf8) else { return "{}" }
@@ -382,6 +400,31 @@ private enum MapPage {
           'circle-stroke-width':2,
           'circle-stroke-color':'#071018'
         }});
+        map.addLayer({
+          id:'pin-labels',
+          type:'symbol',
+          source:'pins',
+          filter:['!=', ['get','label'], ''],
+          layout:{
+            'text-field':['get','label'],
+            'text-font':['DIN Pro Medium', 'Arial Unicode MS Regular'],
+            'text-size':12,
+            'text-line-height':1.15,
+            'text-max-width':8,
+            'text-variable-anchor':['top','bottom','left','right'],
+            'text-radial-offset':1.05,
+            'text-justify':'auto',
+            'text-allow-overlap':false,
+            'text-optional':true,
+            'text-padding':6,
+            'symbol-sort-key':['*', -1, ['get','score']]
+          },
+          paint:{
+            'text-color':'#102018',
+            'text-halo-color':'#f7f4ea',
+            'text-halo-width':1.6
+          }
+        });
         map.addSource('user', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
         map.addLayer({ id:'user', type:'circle', source:'user', paint:{ 'circle-radius':7, 'circle-color':'#ffffff', 'circle-stroke-width':3, 'circle-stroke-color':'#1c8c86' } });
         map.on('click', 'pins', (event) => {
@@ -390,8 +433,14 @@ private enum MapPage {
           event.originalEvent && event.originalEvent.stopPropagation && event.originalEvent.preventDefault();
           post({ type:'select', id: feature.properties.id });
         });
+        map.on('click', 'pin-labels', (event) => {
+          const feature = event.features && event.features[0];
+          if (!feature) return;
+          event.originalEvent && event.originalEvent.stopPropagation && event.originalEvent.preventDefault();
+          post({ type:'select', id: feature.properties.id });
+        });
         map.on('click', (event) => {
-          const hits = map.queryRenderedFeatures(event.point, { layers:['pins'] });
+          const hits = map.queryRenderedFeatures(event.point, { layers:['pins', 'pin-labels'] });
           if (hits.length) return;
           post({ type:'tap', lat: event.lngLat.lat, lon: event.lngLat.lng });
         });
@@ -409,11 +458,15 @@ private enum MapPage {
       ensure(state.token, state.lon, state.lat, state.zoom);
       if (!map || !ready) return;
       if (fly) map.flyTo({ center:[state.lon, state.lat], zoom: state.zoom });
-      const ring = circle(state.lon, state.lat, state.radius);
-      map.getSource('radius').setData({ type:'Feature', geometry:{ type:'Polygon', coordinates:[ring] } });
+      if (state.circleLat == null || state.circleLon == null) {
+        map.getSource('radius').setData({ type:'FeatureCollection', features:[] });
+      } else {
+        const ring = circle(state.circleLon, state.circleLat, state.radius);
+        map.getSource('radius').setData({ type:'Feature', geometry:{ type:'Polygon', coordinates:[ring] } });
+      }
       const features = (state.pins || []).map(pin => ({
         type:'Feature',
-        properties:{ id: pin.id, name: pin.name, score: pin.score, selected: !!pin.selected, marker: pin.marker || '', color: pinColor(pin) },
+        properties:{ id: pin.id, name: pin.name, score: pin.score, selected: !!pin.selected, marker: pin.marker || '', color: pinColor(pin), label: pin.label || '' },
         geometry:{ type:'Point', coordinates:[pin.lon, pin.lat] }
       }));
       map.getSource('pins').setData({ type:'FeatureCollection', features: features });
