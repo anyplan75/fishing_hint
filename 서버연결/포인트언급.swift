@@ -71,6 +71,7 @@ enum MentionFinder {
             if let point = await resolve(
                 draft,
                 corpus: corpus,
+                notes: localNotes,
                 videos: videos,
                 known: localKnown,
                 latitude: latitude,
@@ -145,6 +146,7 @@ enum MentionFinder {
     private static func resolve(
         _ draft: MentionDraft,
         corpus: String,
+        notes: [PublicFishingNote],
         videos: [PublicFishingNote],
         known: [KnownPoint],
         latitude: Double,
@@ -159,6 +161,7 @@ enum MentionFinder {
             var point = item.point
             point.source = "공개포인트"
             if !basis.isEmpty { point.memo = basis }
+            point.targetMemo = mergeSpecies(point.targetMemo, tiedText(place: point.name, basis: basis, notes: notes))
             return point
         }
         let place = draft.value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -183,10 +186,27 @@ enum MentionFinder {
             water: .unknown,
             source: fromVideo ? "유튜브" : "공개글",
             bottom: "",
-            targetMemo: "",
+            targetMemo: TackleBook.names(in: tiedText(place: name, basis: basis, notes: notes)).joined(separator: ", "),
             measuredTempC: nil,
             memo: basis.isEmpty ? "공개 글에 나온 \(place)" : basis
         )
+    }
+
+    private static func tiedText(place: String, basis: String, notes: [PublicFishingNote]) -> String {
+        let name = place.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tied = notes.filter { note in
+            guard name.count >= 2 else { return false }
+            return note.summary.contains(name) || note.placeLabel.contains(name)
+        }
+        return ([basis] + tied.map(\.summary)).joined(separator: "\n")
+    }
+
+    private static func mergeSpecies(_ current: String, _ text: String) -> String {
+        var names = TackleBook.names(in: current)
+        for name in TackleBook.names(in: text) where !names.contains(name) {
+            names.append(name)
+        }
+        return names.joined(separator: ", ")
     }
 
     private static func knownPoint(_ raw: String, known: [KnownPoint]) -> KnownPoint? {

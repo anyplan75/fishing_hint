@@ -370,7 +370,10 @@ enum RecommendEngine {
         } else {
             why.append(contentsOf: best.reasons.map { "조건표: \($0)" })
         }
-        let indexLine = OfficialNotes.caption(pointId: item.point.id, species: best.species, when: best.time)
+        let speciesLabel = (kind == .plan || kind == .now)
+            ? TackleBook.recordedLabel(point: item.point)
+            : best.species
+        let indexLine = OfficialNotes.caption(pointId: item.point.id, species: speciesLabel, when: best.time)
         why.append(indexLine)
         if let lowNote { why.append(lowNote) }
         if let official = officialTideLine(at: best.time, tide: tide) { why.append(official) }
@@ -382,14 +385,14 @@ enum RecommendEngine {
         let reasonCore = best.reasons.prefix(2).joined(separator: ", ")
         let reason = reasonCore.isEmpty ? "이 시각의 물때, 바람, 수온을 보고 골랐습니다." : reasonCore
         let cost = TravelEstimate.won(distanceKm: item.distanceKm)
-        let pickId = "\(kind.rawValue)|\(item.point.id)|\(best.species)|\(Int(best.time.timeIntervalSince1970))"
+        let pickId = "\(kind.rawValue)|\(item.point.id)|\(speciesLabel)|\(Int(best.time.timeIntervalSince1970))"
         let script = factScript(
             point: item.point,
             when: best.time,
             rate: best.score,
             distanceKm: item.distanceKm,
             cost: cost,
-            species: best.species,
+            species: speciesLabel,
             reason: reason,
             why: why,
             facts: facts,
@@ -405,7 +408,7 @@ enum RecommendEngine {
             successRate: min(100, max(0, best.score)),
             distanceKm: item.distanceKm,
             costWon: cost,
-            species: best.species,
+            species: speciesLabel,
             reason: reason,
             whyLines: why,
             facts: facts,

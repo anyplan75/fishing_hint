@@ -187,9 +187,15 @@ struct PointDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
                     .font(.headline)
-                Text("\(plan.species) · \(plan.method)")
+                Text(plan.species)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(FieldColor.good)
+                if plan.method.isEmpty {
+                    Text(plan.summary)
+                        .font(.subheadline)
+                } else {
+                Text(plan.method)
+                    .font(.subheadline.weight(.semibold))
                 Text(plan.summary)
                 Text(plan.why)
                     .font(.subheadline)
@@ -227,6 +233,7 @@ struct PointDetailView: View {
                     ForEach(plan.avoid, id: \.self) { line in
                         Text("· \(line)").font(.subheadline)
                     }
+                }
                 }
             }
         }

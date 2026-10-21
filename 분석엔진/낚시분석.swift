@@ -60,48 +60,62 @@ enum FishingAnalyst {
 
         let future = indexes.filter { conditions.hours[$0].time >= now.addingTimeInterval(-30 * 60) }
         let bestIndex = bestRuleIndex(table: table, future: future)
-        let rule = rules[bestIndex]
         let scores = table[bestIndex]
+        let recorded = TackleBook.recordedNames(point: point)
+        let speciesLabel = recorded.isEmpty ? TackleBook.missingSpecies : recorded.joined(separator: ", ")
         let windows = makeWindows(
             scores: scores,
             reasons: reasonTable[bestIndex],
             hours: conditions.hours,
-            species: rule.name,
+            species: speciesLabel,
             future: future
         )
         let peak = windows.map(\.score).max() ?? (future.map { scores[$0] }.max() ?? 0)
-        let tackle = TackleBook.plan(for: rule.name, context: context(from: conditions, now: now, stained: stained, point: point))
+        let bookNames = recorded.filter { TackleBook.speciesOrder.contains($0) }
+        let tackle: TacklePlan
+        if let first = bookNames.first {
+            var plan = TackleBook.plan(for: first, context: context(from: conditions, now: now, stained: stained, point: point))
+            plan.species = speciesLabel
+            if bookNames.count > 1 {
+                plan.summary = "출처에 적힌 어종은 \(speciesLabel)입니다. 채비는 그 가운데 \(first) 기준입니다. " + plan.summary
+            }
+            tackle = plan
+        } else if recorded.isEmpty {
+            tackle = TackleBook.unrecordedPlan()
+        } else {
+            var plan = TackleBook.unrecordedPlan()
+            plan.species = speciesLabel
+            plan.summary = "출처에 적힌 어종은 \(speciesLabel)입니다. 이 이름의 채비 규격은 없어 규격을 만들지 않습니다."
+            tackle = plan
+        }
 
         var alternate: TacklePlan?
         var alternateNote: String?
-        if let other = alternateIndex(table: table, best: bestIndex, future: future, hours: conditions.hours),
-           rules[other].name != rule.name {
-            let otherPeak = future.map { table[other][$0] }.max() ?? 0
-            if otherPeak >= 62 {
-                alternate = TackleBook.plan(
-                    for: rules[other].name,
-                    context: context(from: conditions, now: now, stained: stained, point: point)
-                )
-                if let when = future.max(by: { table[other][$0] < table[other][$1] }) {
-                    let clock = FieldFormat.clock(conditions.hours[when].time)
-                    alternateNote = "\(clock) 전후는 \(rules[other].name) 점수가 \(otherPeak)점입니다. 예비 채비로 넣어 두세요."
-                }
-            }
+        if bookNames.count > 1 {
+            let second = bookNames[1]
+            alternate = TackleBook.plan(for: second, context: context(from: conditions, now: now, stained: stained, point: point))
+            alternateNote = "출처에 같이 적힌 \(second) 채비입니다. 날짜로 다른 어종을 넣지 않습니다."
+        }
+
+        let shownWindows = windows.map { window -> AttackWindow in
+            var copy = window
+            copy.species = speciesLabel
+            return copy
         }
 
         let risks = riskLines(conditions: conditions, now: now, usedSea: conditions.usedSea)
         let dangerousNow = isDanger(hour(near: now, in: conditions), sea: conditions.usedSea)
         let safeWindow = windows.first { $0.score >= 62 && !windowIsDanger($0, conditions: conditions) }
         let call = decide(dangerousNow: dangerousNow, safeWindow: safeWindow, peak: peak, now: now)
-        let headline = headlineText(call: call, species: rule.name, method: tackle.method, window: windows.first, dangerousNow: dangerousNow)
-        let summary = summaryText(point: point, rule: rule, call: call, window: windows.first, peak: peak)
+        let headline = headlineText(call: call, species: speciesLabel, method: tackle.method, window: shownWindows.first, dangerousNow: dangerousNow)
+        let summary = summaryText(point: point, species: speciesLabel, call: call, window: shownWindows.first, peak: peak)
         let nowLine = nowLine(conditions: conditions, moon: moon, now: now)
         let script = scriptText(
             point: point,
             call: call,
             headline: headline,
             nowLine: nowLine,
-            windows: windows,
+            windows: shownWindows,
             tackle: tackle,
             alternateNote: alternateNote,
             risks: risks,
@@ -116,7 +130,7 @@ enum FishingAnalyst {
             headline: headline,
             summary: summary,
             nowLine: nowLine,
-            windows: windows,
+            windows: shownWindows,
             hourScores: scores,
             tackle: tackle,
             alternate: alternate,
@@ -356,27 +370,35 @@ enum FishingAnalyst {
     }
 
     private static func headlineText(call: GoCall, species: String, method: String, window: AttackWindow?, dangerousNow: Bool) -> String {
+        let named = species != TackleBook.missingSpecies
         switch call {
         case .danger:
-            return "지금은 파도·바람·천둥 때문에 \(species)보다 안전이 먼저입니다."
+            if named { return "지금은 파도·바람·천둥 때문에 \(species)보다 안전이 먼저입니다." }
+            return "지금은 파도·바람·천둥 때문에 안전이 먼저입니다. 기록된 어종 없음"
         case .goNow:
-            return "지금 \(species), \(method)"
+            if !named { return "기록된 어종 없음" }
+            return method.isEmpty ? "지금 \(species)" : "지금 \(species), \(method)"
         case .goLater:
             if let window {
-                return "\(FieldFormat.clock(window.start))부터 \(species)"
+                return named ? "\(FieldFormat.clock(window.start))부터 \(species)" : "\(FieldFormat.clock(window.start))부터. 기록된 어종 없음"
             }
+            if !named { return "기록된 어종 없음" }
             return dangerousNow ? "지금은 위험하고, 조건이 가라앉은 뒤에만 가능합니다." : "오늘 \(species) 조건이 애매합니다."
         case .skip:
-            return "오늘 이 자리는 \(species) 기준으로도 점수가 낮습니다."
+            if named { return "오늘 이 자리는 \(species) 기준으로도 점수가 낮습니다." }
+            return "오늘 이 자리는 조건 점수가 낮습니다. 기록된 어종 없음"
         }
     }
 
-    private static func summaryText(point: FishingPoint, rule: SpeciesRule, call: GoCall, window: AttackWindow?, peak: Int) -> String {
+    private static func summaryText(point: FishingPoint, species: String, call: GoCall, window: AttackWindow?, peak: Int) -> String {
         let place = point.place.title
-        if let window {
-            return "\(point.name)(\(place))은 \(FieldFormat.dayClock(window.start))~\(FieldFormat.clock(window.end))에 \(rule.name) \(peak)점입니다. 그 시간에 맞춰 채비를 싸면 됩니다."
+        if species == TackleBook.missingSpecies {
+            return "\(point.name)(\(place))은 기록된 어종이 없습니다. 조건 점수는 \(peak)점입니다. \(call.title)."
         }
-        return "\(point.name)은 오늘 \(rule.name)으로 잡아도 \(peak)점입니다. \(call.title)."
+        if let window {
+            return "\(point.name)(\(place))의 출처에 적힌 어종은 \(species)입니다. \(FieldFormat.dayClock(window.start))~\(FieldFormat.clock(window.end)) 조건 점수는 \(peak)점입니다."
+        }
+        return "\(point.name)의 출처에 적힌 어종은 \(species)입니다. 조건 점수는 \(peak)점입니다. \(call.title)."
     }
 
     private static func nowLine(conditions: ConditionPack, moon: MoonInfo, now: Date) -> String {
@@ -420,19 +442,24 @@ enum FishingAnalyst {
             let more = windows.dropFirst().map { "\(FieldFormat.clock($0.start))~\(FieldFormat.clock($0.end)) \($0.score)점" }.joined(separator: ", ")
             lines.append("다음 후보: \(more)")
         }
-        lines.append("대상: \(tackle.species). 방법: \(tackle.method).")
-        lines.append("이유: \(tackle.why)")
-        lines.append("가방에 넣을 것: \(tackle.rod). \(tackle.reel). 원줄 \(tackle.mainLine). \(tackle.leader)")
-        lines.append("바늘·루어: \(tackle.terminal)")
-        lines.append("미끼: \(tackle.bait)")
-        if tackle.chum != "없음" { lines.append("밑밥: \(tackle.chum)") }
-        lines.append("채비: \(tackle.rig) \(tackle.depth)")
-        lines.append("입질: \(tackle.bite)")
-        if !tackle.adjustments.isEmpty {
-            lines.append("오늘 보정: \(tackle.adjustments.joined(separator: " "))")
-        }
-        for (index, step) in tackle.steps.enumerated() {
-            lines.append("\(index + 1). \(step)")
+        if tackle.method.isEmpty {
+            lines.append("대상: \(tackle.species)")
+            if !tackle.summary.isEmpty { lines.append(tackle.summary) }
+        } else {
+            lines.append("대상: \(tackle.species). 방법: \(tackle.method).")
+            lines.append("이유: \(tackle.why)")
+            lines.append("가방에 넣을 것: \(tackle.rod). \(tackle.reel). 원줄 \(tackle.mainLine). \(tackle.leader)")
+            lines.append("바늘·루어: \(tackle.terminal)")
+            lines.append("미끼: \(tackle.bait)")
+            if tackle.chum != "없음" { lines.append("밑밥: \(tackle.chum)") }
+            lines.append("채비: \(tackle.rig) \(tackle.depth)")
+            lines.append("입질: \(tackle.bite)")
+            if !tackle.adjustments.isEmpty {
+                lines.append("오늘 보정: \(tackle.adjustments.joined(separator: " "))")
+            }
+            for (index, step) in tackle.steps.enumerated() {
+                lines.append("\(index + 1). \(step)")
+            }
         }
         if let alternateNote { lines.append(alternateNote) }
         if !risks.isEmpty { lines.append("주의: \(risks.joined(separator: " "))") }
