@@ -1,7 +1,8 @@
 import Foundation
 
-// 지도에서 받은 지명에 낚시를 붙여, 네이버와 구글의 공식 검색만 부릅니다.
-// 로그인 뒤의 글과 비공개 글은 보지 않습니다. 막히면 다른 주소로 돌아가지 않습니다.
+// 지도에서 받은 지명으로 낚시 포인트를 찾습니다.
+// 구글은 Custom Search를 쓰지 않습니다. 이미 있는 제미나이 암호로 Google Search grounding만 부릅니다.
+// 인용 출처에 나온 지명만 남기고, 모델이 출처 없이 적은 이름은 버립니다.
 // 키 값은 이 파일에 없습니다.
 
 enum PlaceWebSearch {
@@ -13,6 +14,8 @@ enum PlaceWebSearch {
         var googleConnected: Bool
         var naverReason: String
         var googleReason: String
+        /// 구글이 검색 제안으로 준 HTML입니다. 약관상 결과와 함께 보여 줍니다. 없으면 빈 문자열입니다.
+        var suggestHtml: String
     }
 
     private struct Page {
@@ -22,17 +25,31 @@ enum PlaceWebSearch {
         var source: String
     }
 
+    private struct Span {
+        var text: String
+        var link: String
+    }
+
+    private struct Ground {
+        var spans: [Span]
+        var html: String
+        var model: String
+        var connected: Bool
+        var reason: String
+    }
+
     private static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.timeoutIntervalForRequest = 20
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForRequest = 45
+        config.timeoutIntervalForResource = 60
         return URLSession(configuration: config)
     }()
 
     private static let landforms = ["방파제", "갯바위", "선착장", "포구", "해수욕장", "해변", "부두", "등대", "방조제", "낚시터"]
+    private static let models = ["gemini-3.8-flash", "gemini-2.5-flash"]
 
-    /// 기준점 지명과 주변 지명을 지도에서 받은 뒤, 그 이름에 낚시를 붙여 공식 검색만 합니다.
+    /// 기준점 지명과 주변 지명을 한 번 검색하고, 인용된 이름으로 상세를 한 번만 더 검색합니다.
     static func load(
         latitude: Double,
         longitude: Double,
@@ -40,38 +57,36 @@ enum PlaceWebSearch {
         mapboxToken: String,
         naverId: String,
         naverSecret: String,
-        googleKey: String,
-        googleEngine: String
+        geminiKey: String
     ) async -> Load {
         let names = await placeNames(latitude: latitude, longitude: longitude, token: mapboxToken)
         let naverId = naverId.trimmingCharacters(in: .whitespacesAndNewlines)
         let naverSecret = naverSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-        let googleKey = googleKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let googleEngine = googleEngine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let geminiKey = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let nameLine = names.isEmpty
             ? "지도에서 지명을 받지 못했습니다."
-            : "지도 지명 \(names.joined(separator: ", "))에 낚시를 붙여 검색합니다."
+            : "지도 지명 \(names.joined(separator: ", "))로 검색합니다."
         var naverReason = ""
         var googleReason = ""
-        var naverConnected = false
-        var googleConnected = false
         if naverId.isEmpty || naverSecret.isEmpty {
             naverReason = "네이버 검색 없음. 비밀 파일에 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 이 필요합니다."
         }
-        if googleKey.isEmpty || googleEngine.isEmpty {
-            googleReason = "구글 검색 없음. 비밀 파일에 GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_ENGINE_ID 가 필요합니다."
+        if geminiKey.isEmpty {
+            googleReason = "구글 검색 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다."
         }
         guard !names.isEmpty else {
-            return Load(points: [], note: [nameLine, naverReason, googleReason].filter { !$0.isEmpty }.joined(separator: " "), searchedNames: [], naverConnected: false, googleConnected: false, naverReason: naverReason, googleReason: googleReason)
+            return Load(points: [], note: [nameLine, naverReason, googleReason].filter { !$0.isEmpty }.joined(separator: " "), searchedNames: [], naverConnected: false, googleConnected: false, naverReason: naverReason, googleReason: googleReason, suggestHtml: "")
         }
-        if naverReason.isEmpty == false && googleReason.isEmpty == false {
+        if !naverReason.isEmpty && !googleReason.isEmpty {
             let note = [nameLine, naverReason, googleReason].joined(separator: " ")
-            return Load(points: [], note: note, searchedNames: names, naverConnected: false, googleConnected: false, naverReason: naverReason, googleReason: googleReason)
+            return Load(points: [], note: note, searchedNames: names, naverConnected: false, googleConnected: false, naverReason: naverReason, googleReason: googleReason, suggestHtml: "")
         }
+
         var pages: [Page] = []
-        for name in names {
-            let query = name.contains("낚시") ? name : "\(name) 낚시"
-            if naverReason.isEmpty {
+        var naverConnected = false
+        if naverReason.isEmpty {
+            for name in names {
+                let query = name.contains("낚시") ? name : "\(name) 낚시"
                 let web = await naver(query: query, path: "webkr.json", id: naverId, secret: naverSecret)
                 let blog = await naver(query: query, path: "blog.json", id: naverId, secret: naverSecret)
                 if case .rejected = web { naverReason = "네이버 검색 없음. 인증키가 이 자료를 거절했습니다."; naverConnected = false }
@@ -82,31 +97,210 @@ enum PlaceWebSearch {
                     naverReason = "네이버 검색 없음. 공식 검색 호출이 실패했습니다."
                 }
             }
-            if googleReason.isEmpty {
-                let found = await google(query: query, key: googleKey, engine: googleEngine)
-                if case .rejected = found { googleReason = "구글 검색 없음. 인증키가 이 자료를 거절했습니다."; googleConnected = false }
-                if case .pages(let rows) = found { pages.append(contentsOf: rows); googleConnected = googleReason.isEmpty }
-                if case .failed = found, googleReason.isEmpty {
-                    googleReason = "구글 검색 없음. 공식 검색 호출이 실패했습니다."
-                }
+            if !naverConnected && naverReason.isEmpty {
+                naverReason = "네이버 검색 없음. 공식 검색을 읽지 못했습니다."
             }
         }
-        if !naverConnected && naverReason.isEmpty {
-            naverReason = "네이버 검색 없음. 공식 검색을 읽지 못했습니다."
+
+        var googleConnected = false
+        var suggestHtml = ""
+        var cited: [(name: String, link: String, corpus: String)] = []
+        if googleReason.isEmpty {
+            let asked = names.joined(separator: ", ")
+            let first = await ground(
+                prompt: """
+                반드시 지금 구글 웹 검색을 실행하라. 검색을 건너뛰지 마라.
+                오늘 웹 검색 결과에 실제로 나온 지명만 적어라. \(asked) 주변의 바다낚시 포인트다.
+                검색 결과에 없는 이름은 적지 마라. 기억으로 보충하지 마라.
+                수심, 위험, 새 포인트는 검색 결과에 있을 때만 적어라.
+                """,
+                apiKey: geminiKey,
+                models: models
+            )
+            suggestHtml = first.html
+            googleConnected = first.connected
+            googleReason = first.reason
+            cited = placeNames(in: first.spans)
+            if googleConnected, !cited.isEmpty {
+                let detail = await ground(
+                    prompt: """
+                    반드시 지금 구글 웹 검색을 실행하라. 검색을 건너뛰지 마라.
+                    다음 낚시 포인트만 검색하라: \(cited.map(\.name).joined(separator: ", "))
+                    검색 결과에 나온 어종, 지형, 주의만 짧게 적어라.
+                    검색에 없는 수심, 위험, 새 지명은 만들지 마라.
+                    """,
+                    apiKey: geminiKey,
+                    models: [first.model]
+                )
+                if suggestHtml.isEmpty { suggestHtml = detail.html }
+                cited = mergeDetails(cited, detail: detail.spans)
+            }
         }
-        if !googleConnected && googleReason.isEmpty {
-            googleReason = "구글 검색 없음. 공식 검색을 읽지 못했습니다."
+
+        let keepKm = min(radiusKm, 18)
+        var points = await pointsFrom(
+            pages: pages,
+            latitude: latitude,
+            longitude: longitude,
+            radiusKm: keepKm,
+            token: mapboxToken,
+            naverId: naverId,
+            naverSecret: naverSecret,
+            naverOpen: naverReason.isEmpty || naverConnected
+        )
+        let grounded = await pointsFromCited(
+            cited,
+            latitude: latitude,
+            longitude: longitude,
+            radiusKm: keepKm,
+            token: mapboxToken
+        )
+        for point in grounded where !points.contains(where: { $0.name == point.name }) {
+            points.append(point)
         }
-        let points = await pointsFrom(pages: pages, latitude: latitude, longitude: longitude, radiusKm: radiusKm, token: mapboxToken, naverId: naverId, naverSecret: naverSecret, googleKey: googleKey, googleEngine: googleEngine, naverOpen: naverReason.isEmpty || naverConnected, googleOpen: googleReason.isEmpty || googleConnected)
+
         var bits = [nameLine]
         if points.isEmpty {
-            bits.append("검색 글에서 기준점 근처에 위치를 정한 포인트는 없습니다.")
+            bits.append("검색 글에서 기준점 \(Int(keepKm))km 안에 위치를 정한 포인트는 없습니다.")
         } else {
-            bits.append("검색으로 기준점 근처 \(points.count)곳을 넣었습니다.")
+            bits.append("검색으로 기준점 \(Int(keepKm))km 안 \(points.count)곳을 넣었습니다.")
         }
         if !naverReason.isEmpty { bits.append(naverReason) }
         if !googleReason.isEmpty { bits.append(googleReason) }
-        return Load(points: points, note: bits.joined(separator: " "), searchedNames: names, naverConnected: naverConnected, googleConnected: googleConnected, naverReason: naverReason, googleReason: googleReason)
+        return Load(
+            points: points,
+            note: bits.joined(separator: " "),
+            searchedNames: names,
+            naverConnected: naverConnected,
+            googleConnected: googleConnected,
+            naverReason: naverReason,
+            googleReason: googleReason,
+            suggestHtml: suggestHtml
+        )
+    }
+
+    /// 도구 흔적이 없는 모델은 다음 모델로 한 번만 넘깁니다. 출처 URL이 없는 문장은 이름으로 쓰지 않습니다.
+    private static func ground(prompt: String, apiKey: String, models: [String]) async -> Ground {
+        var last = Ground(spans: [], html: "", model: models.first ?? "", connected: false, reason: "구글 검색 없음. 검색 호출이 실패했습니다.")
+        for model in models where !model.isEmpty {
+            let result = await callGround(model: model, prompt: prompt, apiKey: apiKey)
+            last = result
+            if result.connected || result.reason.contains("거절") { return result }
+            if !result.spans.isEmpty { return result }
+        }
+        return last
+    }
+
+    private static func callGround(model: String, prompt: String, apiKey: String) async -> Ground {
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent") else {
+            return Ground(spans: [], html: "", model: model, connected: false, reason: "구글 검색 없음. 검색 호출이 실패했습니다.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 45
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "contents": [["parts": [["text": prompt]]]],
+            "tools": [["google_search": [String: String]()]],
+            "toolConfig": ["includeServerSideToolInvocations": true],
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse else {
+            return Ground(spans: [], html: "", model: model, connected: false, reason: "구글 검색 없음. 검색 호출이 실패했습니다.")
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            return Ground(spans: [], html: "", model: model, connected: false, reason: "구글 검색 없음. 인증이 거절되었습니다.")
+        }
+        guard (200..<300).contains(http.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return Ground(spans: [], html: "", model: model, connected: false, reason: "구글 검색 없음. 검색 호출이 실패했습니다.")
+        }
+        if object["error"] != nil {
+            return Ground(spans: [], html: "", model: model, connected: false, reason: "구글 검색 없음. 인증이 거절되었습니다.")
+        }
+        let parsed = parseGround(object)
+        if parsed.spans.isEmpty {
+            let reason = parsed.sawTool
+                ? "구글 검색 없음. 인용 출처가 오지 않았습니다."
+                : "구글 검색 없음. 검색 도구 흔적이 없습니다."
+            return Ground(spans: [], html: parsed.html, model: model, connected: false, reason: reason)
+        }
+        return Ground(spans: parsed.spans, html: parsed.html, model: model, connected: true, reason: "")
+    }
+
+    private static func parseGround(_ object: [String: Any]) -> (spans: [Span], html: String, sawTool: Bool) {
+        let candidates = object["candidates"] as? [[String: Any]] ?? []
+        guard let candidate = candidates.first else { return ([], "", false) }
+        let content = candidate["content"] as? [String: Any] ?? [:]
+        let parts = content["parts"] as? [[String: Any]] ?? []
+        let sawCall = parts.contains { $0["toolCall"] != nil }
+        let meta = candidate["groundingMetadata"] as? [String: Any] ?? [:]
+        let html = (meta["searchEntryPoint"] as? [String: Any])?["renderedContent"] as? String ?? ""
+        let chunks = meta["groundingChunks"] as? [[String: Any]] ?? []
+        var links: [String] = []
+        for chunk in chunks {
+            let web = chunk["web"] as? [String: Any] ?? [:]
+            links.append((web["uri"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let supports = meta["groundingSupports"] as? [[String: Any]] ?? []
+        var spans: [Span] = []
+        for support in supports {
+            let segment = support["segment"] as? [String: Any] ?? [:]
+            let text = (segment["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let indices = support["groundingChunkIndices"] as? [Int] ?? []
+            let link = indices.compactMap { index -> String? in
+                guard links.indices.contains(index), !links[index].isEmpty else { return nil }
+                return links[index]
+            }.first ?? ""
+            guard !text.isEmpty, !link.isEmpty else { continue }
+            spans.append(Span(text: text, link: link))
+        }
+        return (spans, html, sawCall || links.contains { !$0.isEmpty })
+    }
+
+    /// 출처 URL이 붙은 문장에서만 지명을 뽑습니다. 그 문장 밖 이름은 넣지 않습니다.
+    private static func placeNames(in spans: [Span]) -> [(name: String, link: String, corpus: String)] {
+        var found: [(name: String, link: String, corpus: String)] = []
+        for span in spans {
+            var names = pointNames(in: span.text)
+            if let whole = citedPlace(span.text), !names.contains(whole) { names.append(whole) }
+            for name in names {
+                if let index = found.firstIndex(where: { $0.name == name }) {
+                    found[index].corpus += " " + span.text
+                    continue
+                }
+                found.append((name, span.link, span.text))
+                if found.count >= 8 { return found }
+            }
+        }
+        return found
+    }
+
+    /// 상세 검색에서 그 지명이 적힌 인용 문장만 붙입니다. 지명이 없는 문장은 버립니다.
+    private static func mergeDetails(
+        _ cited: [(name: String, link: String, corpus: String)],
+        detail: [Span]
+    ) -> [(name: String, link: String, corpus: String)] {
+        cited.map { item in
+            let extra = detail.filter { $0.text.contains(item.name) }.map(\.text).joined(separator: " ")
+            var copy = item
+            if !extra.isEmpty { copy.corpus += " " + extra }
+            return copy
+        }
+    }
+
+    private static func citedPlace(_ raw: String) -> String? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let open = text.firstIndex(of: "(") { text = String(text[..<open]) }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 2, text.count <= 24 else { return nil }
+        let banned = ["검색", "결과", "구글", "반드시", "적어", "입니다", "포인트", "낚시", "주변", "오늘"]
+        if banned.contains(where: { text.contains($0) }) { return nil }
+        let hangul = text.unicodeScalars.filter { (0xAC00...0xD7A3).contains($0.value) }.count
+        guard hangul >= 2 else { return nil }
+        return text
     }
 
     private static func placeNames(latitude: Double, longitude: Double, token: String) async -> [String] {
@@ -179,36 +373,6 @@ enum PlaceWebSearch {
         return .pages(pages)
     }
 
-    private static func google(query: String, key: String, engine: String) async -> Fetch {
-        var parts = URLComponents(string: "https://www.googleapis.com/customsearch/v1")
-        parts?.queryItems = [
-            URLQueryItem(name: "key", value: key),
-            URLQueryItem(name: "cx", value: engine),
-            URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "num", value: "5"),
-            URLQueryItem(name: "hl", value: "ko"),
-        ]
-        guard let url = parts?.url else { return .failed }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
-        request.assumesHTTP3Capable = false
-        guard let (data, response) = try? await session.data(for: request),
-              let http = response as? HTTPURLResponse else { return .failed }
-        if http.statusCode == 401 || http.statusCode == 403 { return .rejected }
-        guard (200..<300).contains(http.statusCode),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .failed }
-        if object["error"] != nil { return .rejected }
-        let items = object["items"] as? [[String: Any]] ?? []
-        let pages = items.compactMap { item -> Page? in
-            let title = plain(item["title"] as? String ?? "")
-            let body = plain(item["snippet"] as? String ?? "")
-            let link = item["link"] as? String ?? ""
-            guard !title.isEmpty || !body.isEmpty else { return nil }
-            return Page(title: title, body: body, link: link, source: "구글")
-        }
-        return .pages(pages)
-    }
-
     private static func pointsFrom(
         pages: [Page],
         latitude: Double,
@@ -217,10 +381,7 @@ enum PlaceWebSearch {
         token: String,
         naverId: String,
         naverSecret: String,
-        googleKey: String,
-        googleEngine: String,
-        naverOpen: Bool,
-        googleOpen: Bool
+        naverOpen: Bool
     ) async -> [FishingPoint] {
         var named: [(name: String, page: Page)] = []
         for page in pages {
@@ -234,39 +395,31 @@ enum PlaceWebSearch {
         }
         var points: [FishingPoint] = []
         for item in named {
-            let detailPages = await detailPages(for: item.name, naverOpen: naverOpen, googleOpen: googleOpen, naverId: naverId, naverSecret: naverSecret, googleKey: googleKey, googleEngine: googleEngine)
-            let corpus = ([item.page] + detailPages).map { $0.title + " " + $0.body }.joined(separator: " ")
-            let looked = await PlaceNameClient.forward(query: item.name, latitude: latitude, longitude: longitude, token: token)
-            guard let hit = looked.hits
-                .map({ ($0, Geo.kilometers(latitude, longitude, $0.latitude, $0.longitude)) })
-                .filter({ $0.1 <= radiusKm + 0.4 })
-                .min(by: { $0.1 < $1.1 })?.0 else { continue }
-            let species = TackleBook.speciesOrder.filter { corpus.contains($0) }
-            let terrain = landforms.filter { corpus.contains($0) }
-            let caution = cautionLine(in: corpus)
-            var memoBits: [String] = []
-            if !species.isEmpty { memoBits.append("어종 \(species.joined(separator: ", "))") }
-            if !terrain.isEmpty { memoBits.append("지형 \(terrain.joined(separator: ", "))") }
-            if !caution.isEmpty { memoBits.append("주의 \(caution)") }
-            let sourcePages = ([item.page] + detailPages).filter { $0.source == item.page.source || !$0.link.isEmpty }
-            let sourceName = item.page.source
-            if !item.page.link.isEmpty { memoBits.append("출처 \(sourceName) \(item.page.link)") }
-            else { memoBits.append("출처 \(sourceName)") }
-            let extra = sourcePages.first { $0.link != item.page.link && !$0.link.isEmpty }
-            if let extra { memoBits.append("출처 \(extra.source) \(extra.link)") }
-            let point = FishingPoint(
-                id: "web-\(stable(item.name, hit.latitude, hit.longitude))",
-                name: item.name,
-                latitude: hit.latitude,
-                longitude: hit.longitude,
-                place: kind(name: item.name, text: corpus),
-                water: water(text: corpus, name: item.name),
-                source: sourceName,
-                bottom: terrain.joined(separator: ", "),
-                targetMemo: species.joined(separator: ", "),
-                measuredTempC: nil,
-                memo: memoBits.joined(separator: ". ")
-            )
+            var corpus = item.page.title + " " + item.page.body
+            if naverOpen {
+                let query = item.name.contains("낚시") ? item.name : "\(item.name) 낚시"
+                if case .pages(let rows) = await naver(query: query, path: "webkr.json", id: naverId, secret: naverSecret) {
+                    corpus += " " + rows.prefix(3).map { $0.title + " " + $0.body }.joined(separator: " ")
+                }
+            }
+            if let point = await locatedPoint(name: item.name, corpus: corpus, link: item.page.link, source: item.page.source, latitude: latitude, longitude: longitude, radiusKm: radiusKm, token: token) {
+                points.append(point)
+            }
+            if points.count >= 10 { break }
+        }
+        return points
+    }
+
+    private static func pointsFromCited(
+        _ cited: [(name: String, link: String, corpus: String)],
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double,
+        token: String
+    ) async -> [FishingPoint] {
+        var points: [FishingPoint] = []
+        for item in cited {
+            guard let point = await locatedPoint(name: item.name, corpus: item.corpus, link: item.link, source: "구글", latitude: latitude, longitude: longitude, radiusKm: radiusKm, token: token) else { continue }
             if points.contains(where: { $0.name == point.name }) { continue }
             points.append(point)
             if points.count >= 10 { break }
@@ -274,28 +427,44 @@ enum PlaceWebSearch {
         return points
     }
 
-    private static func detailPages(
-        for name: String,
-        naverOpen: Bool,
-        googleOpen: Bool,
-        naverId: String,
-        naverSecret: String,
-        googleKey: String,
-        googleEngine: String
-    ) async -> [Page] {
-        let query = name.contains("낚시") ? name : "\(name) 낚시"
-        var pages: [Page] = []
-        if naverOpen {
-            if case .pages(let rows) = await naver(query: query, path: "webkr.json", id: naverId, secret: naverSecret) {
-                pages.append(contentsOf: rows.prefix(3))
-            }
-        }
-        if googleOpen {
-            if case .pages(let rows) = await google(query: query, key: googleKey, engine: googleEngine) {
-                pages.append(contentsOf: rows.prefix(3))
-            }
-        }
-        return pages
+    /// 검색에 없는 수심과 위험은 넣지 않습니다. 주의 문장은 인용 문장에 그 말이 있을 때만 붙입니다.
+    private static func locatedPoint(
+        name: String,
+        corpus: String,
+        link: String,
+        source: String,
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double,
+        token: String
+    ) async -> FishingPoint? {
+        let looked = await PlaceNameClient.forward(query: name, latitude: latitude, longitude: longitude, token: token)
+        guard let hit = looked.hits
+            .map({ ($0, Geo.kilometers(latitude, longitude, $0.latitude, $0.longitude)) })
+            .filter({ $0.1 <= radiusKm + 0.4 })
+            .min(by: { $0.1 < $1.1 })?.0 else { return nil }
+        let species = TackleBook.speciesOrder.filter { corpus.contains($0) }
+        let terrain = landforms.filter { corpus.contains($0) }
+        let caution = cautionLine(in: corpus)
+        var memoBits: [String] = []
+        if !species.isEmpty { memoBits.append("어종 \(species.joined(separator: ", "))") }
+        if !terrain.isEmpty { memoBits.append("지형 \(terrain.joined(separator: ", "))") }
+        if !caution.isEmpty { memoBits.append("주의 \(caution)") }
+        if !link.isEmpty { memoBits.append("출처 \(source) \(link)") }
+        else { memoBits.append("출처 \(source)") }
+        return FishingPoint(
+            id: "web-\(stable(name, hit.latitude, hit.longitude))",
+            name: name,
+            latitude: hit.latitude,
+            longitude: hit.longitude,
+            place: kind(name: name, text: corpus),
+            water: water(text: corpus, name: name),
+            source: source,
+            bottom: terrain.joined(separator: ", "),
+            targetMemo: species.joined(separator: ", "),
+            measuredTempC: nil,
+            memo: memoBits.joined(separator: ". ")
+        )
     }
 
     private static func pointNames(in text: String) -> [String] {
@@ -323,7 +492,7 @@ enum PlaceWebSearch {
         guard token.count >= 1 else { return nil }
         let hangul = token.unicodeScalars.filter { (0xAC00...0xD7A3).contains($0.value) }.count
         guard hangul >= 1 else { return nil }
-        let banned = ["낚시", "추천", "정보", "조황", "최고", "인기", "근처", "주변", "오늘", "블로그"]
+        let banned = ["낚시", "추천", "정보", "조황", "최고", "인기", "근처", "주변", "오늘", "블로그", "검색", "결과"]
         if banned.contains(where: { token.contains($0) }) { return nil }
         let name = token + suffix
         guard name.count <= 18 else { return nil }

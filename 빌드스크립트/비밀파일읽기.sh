@@ -65,8 +65,6 @@ write_let() {
   write_let fishingIndex DATA_GO_KR_FISHING_INDEX_KEY
   write_let naverClientId NAVER_CLIENT_ID
   write_let naverClientSecret NAVER_CLIENT_SECRET
-  write_let googleSearchKey GOOGLE_SEARCH_API_KEY
-  write_let googleSearchEngineId GOOGLE_SEARCH_ENGINE_ID
   printf '%s\n' "}"
 } > "${OUT}"
 

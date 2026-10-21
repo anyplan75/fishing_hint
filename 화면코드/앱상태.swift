@@ -93,9 +93,8 @@ final class AppStore: ObservableObject {
     /// 네이버 공식 검색만 씁니다. 없으면 화면에는 필요한 키 이름만 적습니다.
     @Published var naverClientId = ""
     @Published var naverClientSecret = ""
-    /// 구글 공식 검색만 씁니다. 유튜브 키로 대신 부르지 않습니다.
-    @Published var googleSearchKey = ""
-    @Published var googleSearchEngineId = ""
+    /// 구글 검색 제안 HTML입니다. 결과 카드 위에 그대로 보여 줍니다.
+    @Published var googleSuggestHtml = ""
     @Published var planPicks: [SpotPick] = []
     @Published var nowPicks: [SpotPick] = []
     @Published var shorePicks: [SpotPick] = []
@@ -113,7 +112,7 @@ final class AppStore: ObservableObject {
     @Published var fishingSpotLink = LinkLine.absent("전국낚시터 없음. 아직 표준데이터를 부르지 않았습니다.")
     @Published var scubaLink = LinkLine.absent("스킨스쿠버지수 없음. 비밀 파일에 DATA_GO_KR_SERVICE_KEY 가 없습니다.")
     @Published var naverLink = LinkLine.absent("네이버 검색 없음. 비밀 파일에 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 이 필요합니다.")
-    @Published var googleLink = LinkLine.absent("구글 검색 없음. 비밀 파일에 GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_ENGINE_ID 가 필요합니다.")
+    @Published var googleLink = LinkLine.absent("구글 검색 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
     @Published var savedTimes: [String: SavedSpotTimes] = [:]
     @Published var savedTimesNote = "저장한 자리의 낚시 시간과 해루질 시간을 받은 예보로 계산합니다."
 
@@ -147,8 +146,6 @@ final class AppStore: ObservableObject {
         fishingIndexKey = secrets.fishingIndex
         naverClientId = secrets.naverClientId
         naverClientSecret = secrets.naverClientSecret
-        googleSearchKey = secrets.googleSearchKey
-        googleSearchEngineId = secrets.googleSearchEngineId
         locator.onFix = { [weak self] coordinate in
             self?.applyFix(coordinate)
         }
@@ -859,6 +856,7 @@ final class AppStore: ObservableObject {
         var points: [FishingPoint]
         var intro: String
         var title: String
+        var suggestHtml: String
     }
 
     private var mentionMemory: MentionMemory?
@@ -882,7 +880,7 @@ final class AppStore: ObservableObject {
         let generation = recommendGen
         recommendBusy = true
         let waiting = mentions
-            ? "공개 글, 유튜브, 바다낚시지수, 전국낚시터를 읽는 중"
+            ? "공개 글, 유튜브, 바다낚시지수, 전국낚시터, 구글 지명 검색을 읽는 중"
             : "주변 자리, 스킨스쿠버지수, 물때, 수온을 계산하는 중"
         writeRecommendMessage(waiting, slot: slot)
         Task {
@@ -979,10 +977,11 @@ final class AppStore: ObservableObject {
         let located: [FishingPoint]
         let intro: String
         let title: String
-        if let remembered, remembered.signature == signature, Date().timeIntervalSince(remembered.at) < 600, !remembered.points.isEmpty {
+        if let remembered, remembered.signature == signature, !remembered.points.isEmpty {
             located = remembered.points
             intro = remembered.intro
             title = remembered.title
+            googleSuggestHtml = remembered.suggestHtml
         } else {
             async let noteCall = PublicFishingClient.load()
             async let nameCall = PlaceNameClient.areaLabels(latitude: center.lat, longitude: center.lon, token: mapboxToken)
@@ -1025,8 +1024,7 @@ final class AppStore: ObservableObject {
                 mapboxToken: mapboxToken,
                 naverId: naverClientId,
                 naverSecret: naverClientSecret,
-                googleKey: googleSearchKey,
-                googleEngine: googleSearchEngineId
+                geminiKey: geminiKey
             )
             noteFishingIndex(index)
             noteFishingSpots(spots)
@@ -1034,7 +1032,7 @@ final class AppStore: ObservableObject {
             if !index.connected {
                 OfficialNotes.blocked = index.note
             }
-            var merged = outcome.points + index.points + spots.points + web.points
+            let merged = outcome.points + index.points + spots.points + web.points
             var kept: [FishingPoint] = []
             for point in merged {
                 if kept.contains(where: { Geo.kilometers($0.latitude, $0.longitude, point.latitude, point.longitude) < 0.4 && $0.name == point.name }) {
@@ -1049,10 +1047,10 @@ final class AppStore: ObservableObject {
                 return .failure(RecommendMessageError(message: reason.joined(separator: " ")))
             }
             located = kept
-            var lines = [outcome.points.isEmpty ? (outcome.failure ?? "") : outcome.intro, index.note, spots.note, web.note]
+            let lines = [outcome.points.isEmpty ? (outcome.failure ?? "") : outcome.intro, index.note, spots.note, web.note]
             intro = lines.filter { !$0.isEmpty }.joined(separator: " ")
             title = anchorName
-            mentionMemory = MentionMemory(signature: signature, at: Date(), points: located, intro: intro, title: title)
+            mentionMemory = MentionMemory(signature: signature, at: Date(), points: located, intro: intro, title: title, suggestHtml: web.suggestHtml)
         }
         guard let pack = try? await cachedConditions(latitude: center.lat, longitude: center.lon) else {
             return .failure(RecommendMessageError(message: "날씨와 바다 정보를 가져오지 못했습니다. 인터넷을 확인한 뒤 다시 누르세요."))
@@ -1331,14 +1329,15 @@ final class AppStore: ObservableObject {
         if naverClientId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || naverClientSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             naverLink = .absent("네이버 검색 없음. 비밀 파일에 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 이 필요합니다.")
         }
-        if googleSearchKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || googleSearchEngineId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            googleLink = .absent("구글 검색 없음. 비밀 파일에 GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_ENGINE_ID 가 필요합니다.")
+        if geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            googleLink = .absent("구글 검색 없음. 비밀 파일에 GEMINI_API_KEY 가 없습니다.")
         }
     }
 
     private func noteWeb(_ load: PlaceWebSearch.Load) {
         naverLink = load.naverConnected ? .connected : .absent(load.naverReason)
         googleLink = load.googleConnected ? .connected : .absent(load.googleReason)
+        googleSuggestHtml = load.suggestHtml
     }
 
     private func noteFishingIndex(_ load: SeaFishingIndexClient.Load) {

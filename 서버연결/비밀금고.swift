@@ -16,9 +16,6 @@ struct SecretPair {
     /// 네이버 공식 검색만 읽습니다. 없으면 빈 문자열입니다.
     var naverClientId: String
     var naverClientSecret: String
-    /// 구글 공식 검색만 읽습니다. 없으면 빈 문자열입니다.
-    var googleSearchKey: String
-    var googleSearchEngineId: String
 }
 
 enum SecretVault {
@@ -31,9 +28,7 @@ enum SecretVault {
             youtube: BakedSecrets.youtube,
             fishingIndex: BakedSecrets.fishingIndex,
             naverClientId: BakedSecrets.naverClientId,
-            naverClientSecret: BakedSecrets.naverClientSecret,
-            googleSearchKey: BakedSecrets.googleSearchKey,
-            googleSearchEngineId: BakedSecrets.googleSearchEngineId
+            naverClientSecret: BakedSecrets.naverClientSecret
         )
     }
 }

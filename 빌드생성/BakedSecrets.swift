@@ -8,6 +8,4 @@ enum BakedSecrets {
     static let fishingIndex = ""
     static let naverClientId = ""
     static let naverClientSecret = ""
-    static let googleSearchKey = ""
-    static let googleSearchEngineId = ""
 }

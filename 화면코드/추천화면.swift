@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 // 낚시 계획, 바로가자, 해루질 화면입니다.
 // 낚시는 주간·야간을 고르지 않고, 해루질만 주간과 야간을 나눕니다.
@@ -65,7 +66,7 @@ struct RecommendScreen: View {
 
     private var planPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 지도에서 받은 지명에 낚시를 붙여 네이버·구글 공식 검색을 하고, 글에 있는 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 기준점 반경 안에서 위치를 정한 자리만 최대 10곳을 줄 세웁니다. 검색 키가 없으면 필요한 키 이름만 적습니다.")
+            Text("기준은 내 위치 또는 저장한 지역 한 점입니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 기준점 약 18km 안에서 위치를 정한 자리만 최대 10곳을 줄 세웁니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             DatePicker("날짜", selection: $day, displayedComponents: .date)
@@ -83,6 +84,9 @@ struct RecommendScreen: View {
             Text(store.planMessage)
                 .font(.caption)
                 .foregroundStyle(FieldColor.muted)
+            if !store.googleSuggestHtml.isEmpty {
+                SearchSuggestBox(html: store.googleSuggestHtml)
+            }
             if store.planPicks.isEmpty {
                 Text("추천 자리가 없으면 위 문장에 이유를 적습니다. 위치를 못 정한 글은 넣지 않습니다.")
                     .font(.subheadline)
@@ -96,7 +100,7 @@ struct RecommendScreen: View {
 
     private var nowPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("기준은 현재 위치 한 점입니다. 지도에서 받은 지명에 낚시를 붙여 네이버·구글 공식 검색을 하고, 글에 있는 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 기준점 반경 안에서 위치를 정한 자리만 최대 3곳을 줄 세웁니다. 검색 키가 없으면 필요한 키 이름만 적습니다.")
+            Text("기준은 현재 위치 한 점입니다. 그 지명과 주변 지명으로 구글 검색을 하고, 출처에 나온 포인트만 다시 검색합니다. 공개 글, 유튜브, 바다낚시지수, 전국낚시터도 읽습니다. 기준점 약 18km 안에서 위치를 정한 자리만 최대 3곳을 줄 세웁니다. 네이버 키가 없으면 네이버는 부르지 않습니다.")
                 .font(.subheadline)
                 .foregroundStyle(FieldColor.muted)
             Button(store.recommendBusy ? "계산 중" : "지금 3곳 찾기") { store.recommendNow() }
@@ -106,6 +110,9 @@ struct RecommendScreen: View {
                 .font(.caption)
                 .foregroundStyle(FieldColor.muted)
                 .lineLimit(store.nowPicks.isEmpty ? 4 : nil)
+            if !store.googleSuggestHtml.isEmpty {
+                SearchSuggestBox(html: store.googleSuggestHtml)
+            }
             ForEach(store.nowPicks) { pick in
                 Button { store.selectedPickId = pick.id } label: { PickRow(pick: pick) }
                     .buttonStyle(.plain)
@@ -220,6 +227,7 @@ struct PickRow: View {
         case "바다낚시지수": return "바다낚시지수"
         case "낚시터표준": return "전국낚시터"
         case "스킨스쿠버": return "스킨스쿠버지수"
+        case "구글": return "구글 검색에서 확인"
         default: return pick.point.place.title
         }
     }
@@ -425,3 +433,56 @@ struct PickDetailView: View {
         }
     }
 }
+
+/// 구글이 준 검색 제안 HTML을 고치지 않고 결과 위에 작게 보여 줍니다.
+struct SearchSuggestBox: View {
+    var html: String
+
+    var body: some View {
+        SearchSuggestWeb(html: html)
+            .frame(height: 96)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(FieldColor.line, lineWidth: 1))
+    }
+}
+
+#if os(iOS)
+private struct SearchSuggestWeb: UIViewRepresentable {
+    var html: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        let view = WKWebView()
+        view.isOpaque = false
+        view.scrollView.isScrollEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: WKWebView, context: Context) {
+        guard context.coordinator.shown != html else { return }
+        context.coordinator.shown = html
+        view.loadHTMLString(html, baseURL: URL(string: "https://www.google.com"))
+    }
+
+    func makeCoordinator() -> Holder { Holder() }
+
+    final class Holder { var shown = "" }
+}
+#else
+private struct SearchSuggestWeb: NSViewRepresentable {
+    var html: String
+
+    func makeNSView(context: Context) -> WKWebView {
+        WKWebView()
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {
+        guard context.coordinator.shown != html else { return }
+        context.coordinator.shown = html
+        view.loadHTMLString(html, baseURL: URL(string: "https://www.google.com"))
+    }
+
+    func makeCoordinator() -> Holder { Holder() }
+
+    final class Holder { var shown = "" }
+}
+#endif
