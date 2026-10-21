@@ -1,6 +1,7 @@
 import SwiftUI
 
-// 지도가 화면의 대부분입니다. 왼쪽 클릭과 드래그는 지도를 옮길 때만 씁니다.
+// 지도가 화면의 대부분입니다. 빈 곳의 왼쪽 클릭과 짧은 탭은 지도를 옮길 때만 씁니다.
+// 이름과 성공률 글자를 누르면 그 포인트 정보가 바로 열립니다.
 // 장소 저장은 오른쪽 클릭이나 길게 누르기에서 이름을 물은 뒤에만 합니다.
 
 struct MapScreen: View {
@@ -60,7 +61,10 @@ struct MapScreen: View {
                     onSave: { lat, lon in
                         store.askPlaceName(latitude: lat, longitude: lon)
                     },
-                    onSelect: { _ in },
+                    onSelect: { id in
+                        infoOpen = true
+                        store.select(id)
+                    },
                     onMove: { lat, lon in store.rememberMap(latitude: lat, longitude: lon) },
                     onMap: { store.noteMap(ok: $0) }
                 )
@@ -331,7 +335,13 @@ struct PointRankCard: View {
             Text(briefing.nowLine)
                 .font(.caption)
                 .foregroundStyle(FieldColor.muted)
-                .lineLimit(2)
+            if !briefing.conditionLines.isEmpty {
+                ForEach(Array(briefing.conditionLines.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundStyle(FieldColor.paper)
+                }
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

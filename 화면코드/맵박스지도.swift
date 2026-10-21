@@ -401,29 +401,48 @@ private enum MapPage {
           'circle-stroke-width':2,
           'circle-stroke-color':'#071018'
         }});
+        const plateSize = 16;
+        const plateData = new Uint8Array(plateSize * plateSize * 4);
+        for (let i = 0; i < plateSize * plateSize; i++) {
+          plateData[i * 4] = 247;
+          plateData[i * 4 + 1] = 244;
+          plateData[i * 4 + 2] = 234;
+          plateData[i * 4 + 3] = 242;
+        }
+        if (!map.hasImage('label-plate')) {
+          map.addImage('label-plate', { width: plateSize, height: plateSize, data: plateData }, {
+            pixelRatio: 2,
+            stretchX: [[2, 14]],
+            stretchY: [[2, 14]],
+            content: [2, 2, 14, 14]
+          });
+        }
         map.addLayer({
           id:'pin-labels',
           type:'symbol',
           source:'pins',
           filter:['!=', ['get','label'], ''],
           layout:{
+            'icon-image':'label-plate',
+            'icon-text-fit':'both',
+            'icon-text-fit-padding':[5, 8, 5, 8],
             'text-field':['get','label'],
             'text-font':['DIN Pro Medium', 'Arial Unicode MS Regular'],
-            'text-size':12,
-            'text-line-height':1.15,
-            'text-max-width':8,
+            'text-size':15,
+            'text-line-height':1.2,
+            'text-max-width':10,
             'text-variable-anchor':['top','bottom','left','right'],
-            'text-radial-offset':1.05,
+            'text-radial-offset':1.15,
             'text-justify':'auto',
             'text-allow-overlap':false,
             'text-optional':true,
-            'text-padding':6,
+            'text-padding':2,
             'symbol-sort-key':['*', -1, ['get','score']]
           },
           paint:{
             'text-color':'#102018',
             'text-halo-color':'#f7f4ea',
-            'text-halo-width':1.6
+            'text-halo-width':0
           }
         });
         map.addSource('user', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
@@ -433,11 +452,13 @@ private enum MapPage {
         let holdLngLat = null;
         let holdStarted = 0;
         let lastSave = 0;
+        let suppressSelect = 0;
         function askSave(lngLat) {
           if (!lngLat) return;
           const now = Date.now();
           if (now - lastSave < 700) return;
           lastSave = now;
+          suppressSelect = now;
           post({ type:'save', lat: lngLat.lat, lon: lngLat.lng });
         }
         function clearHold() {
@@ -490,6 +511,18 @@ private enum MapPage {
           clearHold();
           if (elapsed >= 450 && lngLat) askSave(lngLat);
         });
+        map.on('click', 'pin-labels', (event) => {
+          if (Date.now() - suppressSelect < 800) return;
+          const feature = event.features && event.features[0];
+          const id = feature && feature.properties && feature.properties.id;
+          if (!id) return;
+          if (event.preventDefault) event.preventDefault();
+          const raw = event.originalEvent;
+          if (raw && raw.stopPropagation) raw.stopPropagation();
+          post({ type:'select', id: String(id) });
+        });
+        map.on('mouseenter', 'pin-labels', () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', 'pin-labels', () => { map.getCanvas().style.cursor = ''; });
         map.on('moveend', () => {
           const c = map.getCenter();
           post({ type:'move', lat: c.lat, lon: c.lng });

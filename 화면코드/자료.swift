@@ -189,6 +189,8 @@ struct PointBriefing: Identifiable {
     var script: String
     var aiScript: String?
     var conditions: ConditionPack
+    /// 화면에 나온 어종마다, 조건표에 있는 범위와 지금 값입니다. 없는 수치는 넣지 않습니다.
+    var conditionLines: [String]
 }
 
 enum RecommendKind: String {
@@ -244,6 +246,8 @@ struct SpotPick: Identifiable {
     var aiReason: String?
     /// 그 자리에 붙은 공식 바다낚시지수입니다. 가까운 지수가 없으면 "지수 없음"입니다.
     var indexLine: String
+    /// 이 카드가 다루는 어종의 조건표 범위와 지금 값입니다.
+    var conditionLines: [String]
 }
 
 /// 지도나 추천에서 자리를 누른 뒤, 이름을 물어 저장할 때 쓰는 묶음입니다.

@@ -9,6 +9,15 @@ enum GeocodeReach {
 }
 
 enum PlaceNameClient {
+    /// 공유 세션은 응답이 끝나지 않으면 며칠을 기다릴 수 있습니다. 지명 조회는 여기서 끊습니다.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 12
+        config.timeoutIntervalForResource = 18
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
+
     enum PlaceKind {
         /// 식당·숙소가 아닌 장소입니다. 화면에 식당이나 숙소라고 적지 않습니다.
         case plain
@@ -52,7 +61,7 @@ enum PlaceNameClient {
             "types": "neighborhood,locality,place,region",
             "access_token": token,
         ]) else { return [] }
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
+        guard let (data, response) = try? await session.data(from: url),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let features = object["features"] as? [[String: Any]] else { return [] }
@@ -106,7 +115,7 @@ enum PlaceNameClient {
     }
 
     private static func hits(_ url: URL) async -> (items: [Hit], reach: GeocodeReach) {
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
+        guard let (data, response) = try? await session.data(from: url),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let features = object["features"] as? [[String: Any]] else { return ([], .failed) }

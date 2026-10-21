@@ -123,6 +123,7 @@ final class AppStore: ObservableObject {
     private var cache: [String: ConditionPack] = [:]
     private var refreshGen = 0
     private var recommendGen = 0
+    private var recommendTask: Task<Void, Never>?
     private var savedPlanGen = 0
     private var didFirstFix = false
     private var roadGen = 0
@@ -925,6 +926,7 @@ final class AppStore: ObservableObject {
         mentions: Bool = false,
         work: @escaping (RecommendContext, Int) async -> Void
     ) {
+        recommendTask?.cancel()
         recommendGen += 1
         let generation = recommendGen
         recommendBusy = true
@@ -932,11 +934,11 @@ final class AppStore: ObservableObject {
             ? "공개 글, 유튜브, 바다낚시지수, 전국낚시터, 구글 지명 검색을 읽는 중"
             : "주변 자리, 스킨스쿠버지수, 물때, 수온을 계산하는 중"
         writeRecommendMessage(waiting, slot: slot)
-        Task {
+        let job = Task { @MainActor in
             let loaded = mentions
                 ? await self.loadMentionedContext(from: from, to: to)
                 : await self.loadRecommendContext(scope: scope, requireUser: requireUser, from: from, to: to)
-            guard generation == self.recommendGen else { return }
+            guard !Task.isCancelled, generation == self.recommendGen else { return }
             switch loaded {
             case .failure(let error):
                 self.recommendBusy = false
@@ -944,6 +946,15 @@ final class AppStore: ObservableObject {
             case .success(let context):
                 await work(context, generation)
             }
+        }
+        recommendTask = job
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 90_000_000_000)
+            guard generation == self.recommendGen, self.recommendBusy else { return }
+            job.cancel()
+            self.recommendGen += 1
+            self.recommendBusy = false
+            self.writeRecommendMessage("지도 지명 조회가 제한 시간 안에 끝나지 않아 계산을 끊었습니다. 계산 중으로 두지 않습니다. 인터넷을 확인한 뒤 다시 누르세요.", slot: slot)
         }
     }
 
@@ -1032,8 +1043,11 @@ final class AppStore: ObservableObject {
         } else {
             async let noteCall = PublicFishingClient.load()
             async let nameCall = PlaceNameClient.areaLabels(latitude: center.lat, longitude: center.lon, token: mapboxToken)
-            let bundle = await noteCall
-            let labels = await nameCall
+        let bundle = await noteCall
+        let labels = await nameCall
+        if Task.isCancelled {
+            return .failure(RecommendMessageError(message: "지도 지명 조회가 끝나지 않아 계산을 끊었습니다. 계산 중으로 두지 않습니다."))
+        }
             let anchorName = labels.first { PublicNearby.canFilter($0) } ?? labels.first ?? center.title
             let notes = PublicNearby.keep(bundle.notes, anchor: labels.joined(separator: " "))
             let region = labels.filter { PublicNearby.canFilter($0) }.min { $0.count < $1.count } ?? anchorName
@@ -1064,6 +1078,9 @@ final class AppStore: ObservableObject {
             )
             let index = await indexCall
             let spots = await spotCall
+            if Task.isCancelled {
+                return .failure(RecommendMessageError(message: "지도 지명 조회가 끝나지 않아 계산을 끊었습니다. 계산 중으로 두지 않습니다."))
+            }
             let web = await PlaceWebSearch.load(
                 latitude: center.lat,
                 longitude: center.lon,
@@ -1102,11 +1119,15 @@ final class AppStore: ObservableObject {
             title = anchorName
             mentionMemory = MentionMemory(signature: signature, at: Date(), points: located, intro: intro, title: title, suggestHtml: web.suggestHtml)
         }
+        if Task.isCancelled {
+            return .failure(RecommendMessageError(message: "지도 지명 조회가 끝나지 않아 계산을 끊었습니다. 계산 중으로 두지 않습니다."))
+        }
         guard let pack = try? await cachedConditions(latitude: center.lat, longitude: center.lon) else {
             return .failure(RecommendMessageError(message: "날씨와 바다 정보를 가져오지 못했습니다. 인터넷을 확인한 뒤 다시 누르세요."))
         }
         var prepared: [RecommendEngine.PreparedPoint] = []
         for point in located {
+            if Task.isCancelled { break }
             let away = Geo.kilometers(center.lat, center.lon, point.latitude, point.longitude)
             let pointPack: ConditionPack
             if away > 12 {
@@ -1121,6 +1142,9 @@ final class AppStore: ObservableObject {
                 distanceKm: travel.km,
                 distanceFromUser: travel.fromUser
             ))
+        }
+        if Task.isCancelled {
+            return .failure(RecommendMessageError(message: "지도 지명 조회가 끝나지 않아 계산을 끊었습니다. 계산 중으로 두지 않습니다."))
         }
         let tide = await PublicTideClient.forecast(
             latitude: center.lat,

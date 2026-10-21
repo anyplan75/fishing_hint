@@ -86,6 +86,7 @@ enum PlaceWebSearch {
         var naverConnected = false
         if naverReason.isEmpty {
             for name in names {
+                if Task.isCancelled { break }
                 let query = name.contains("낚시") ? name : "\(name) 낚시"
                 let web = await naver(query: query, path: "webkr.json", id: naverId, secret: naverSecret)
                 let blog = await naver(query: query, path: "blog.json", id: naverId, secret: naverSecret)
@@ -395,6 +396,7 @@ enum PlaceWebSearch {
         }
         var points: [FishingPoint] = []
         for item in named {
+            if Task.isCancelled { break }
             var corpus = item.page.title + " " + item.page.body
             if naverOpen {
                 let query = item.name.contains("낚시") ? item.name : "\(item.name) 낚시"
@@ -419,6 +421,7 @@ enum PlaceWebSearch {
     ) async -> [FishingPoint] {
         var points: [FishingPoint] = []
         for item in cited {
+            if Task.isCancelled { break }
             guard let point = await locatedPoint(name: item.name, corpus: item.corpus, link: item.link, source: "구글", latitude: latitude, longitude: longitude, radiusKm: radiusKm, token: token) else { continue }
             if points.contains(where: { $0.name == point.name }) { continue }
             points.append(point)

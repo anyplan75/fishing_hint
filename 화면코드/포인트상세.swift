@@ -64,6 +64,21 @@ struct PointDetailView: View {
                 Text(briefing.nowLine)
                     .font(.subheadline)
                     .foregroundStyle(FieldColor.muted)
+                if !briefing.conditionLines.isEmpty {
+                    FieldCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("어종 조건")
+                                .font(.headline)
+                            Text("조건표에 있는 범위와 지금 값만 적습니다. 없는 수치는 만들지 않습니다.")
+                                .font(.caption)
+                                .foregroundStyle(FieldColor.muted)
+                            ForEach(Array(briefing.conditionLines.enumerated()), id: \.offset) { _, line in
+                                Text(line)
+                                    .font(.subheadline)
+                            }
+                        }
+                    }
+                }
                 Text(briefing.conditions.note)
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)

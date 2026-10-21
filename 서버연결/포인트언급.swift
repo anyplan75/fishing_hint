@@ -68,6 +68,7 @@ enum MentionFinder {
         var resolved: [FishingPoint] = []
         var missed = 0
         for draft in drafts {
+            if Task.isCancelled { break }
             if let point = await resolve(
                 draft,
                 corpus: corpus,

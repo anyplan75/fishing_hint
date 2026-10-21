@@ -40,7 +40,10 @@ enum FishingAnalyst {
         distanceKm: Double?,
         now: Date = Date()
     ) -> PointBriefing {
-        let rules = filteredRules(point: point, conditions: conditions, preferred: preferred)
+        let recorded = TackleBook.recordedNames(point: point)
+        var rules = filteredRules(point: point, conditions: conditions, preferred: preferred)
+        let matched = rules.filter { recorded.contains($0.name) }
+        if !matched.isEmpty { rules = matched }
         let stained = recentRain(conditions, now: now) >= 4
         let indexes = Array(conditions.hours.indices)
         var table: [[Int]] = []
@@ -61,7 +64,6 @@ enum FishingAnalyst {
         let future = indexes.filter { conditions.hours[$0].time >= now.addingTimeInterval(-30 * 60) }
         let bestIndex = bestRuleIndex(table: table, future: future)
         let scores = table[bestIndex]
-        let recorded = TackleBook.recordedNames(point: point)
         let speciesLabel = recorded.isEmpty ? TackleBook.missingSpecies : recorded.joined(separator: ", ")
         let windows = makeWindows(
             scores: scores,
@@ -100,8 +102,21 @@ enum FishingAnalyst {
         let shownWindows = windows.map { window -> AttackWindow in
             var copy = window
             copy.species = speciesLabel
+            if recorded.isEmpty {
+                copy.reasons = copy.reasons.filter { line in
+                    !TackleBook.speciesOrder.contains { line.contains($0) }
+                }
+                if copy.reasons.isEmpty {
+                    copy.reasons = ["기록된 어종이 없어 어종 조건은 붙이지 않았습니다."]
+                }
+            }
             return copy
         }
+        let conditionLines = Self.conditionLines(
+            names: recorded,
+            hour: hour(near: now, in: conditions),
+            sea: conditions.usedSea
+        )
 
         let risks = riskLines(conditions: conditions, now: now, usedSea: conditions.usedSea)
         let dangerousNow = isDanger(hour(near: now, in: conditions), sea: conditions.usedSea)
@@ -110,7 +125,7 @@ enum FishingAnalyst {
         let headline = headlineText(call: call, species: speciesLabel, method: tackle.method, window: shownWindows.first, dangerousNow: dangerousNow)
         let summary = summaryText(point: point, species: speciesLabel, call: call, window: shownWindows.first, peak: peak)
         let nowLine = nowLine(conditions: conditions, moon: moon, now: now)
-        let script = scriptText(
+        var script = scriptText(
             point: point,
             call: call,
             headline: headline,
@@ -121,6 +136,9 @@ enum FishingAnalyst {
             risks: risks,
             moon: moon
         )
+        if !conditionLines.isEmpty {
+            script += "\n어종 조건:\n" + conditionLines.joined(separator: "\n")
+        }
 
         return PointBriefing(
             point: point,
@@ -138,7 +156,8 @@ enum FishingAnalyst {
             risks: risks,
             script: script,
             aiScript: nil,
-            conditions: conditions
+            conditions: conditions,
+            conditionLines: conditionLines
         )
     }
 
@@ -206,22 +225,26 @@ enum FishingAnalyst {
 
         var reasons: [String] = []
         let water = point.measuredTempC ?? (rule.water == .fresh ? (hour.seaC ?? hour.airC) : (hour.seaC ?? hour.airC))
+        let waterName = (point.measuredTempC != nil || hour.seaC != nil) ? "수온" : "기온"
+        let tempSpan = String(format: "잘 맞는 범위 %.0f~%.0f도, 가능한 범위 %.0f~%.0f도", rule.bestMin, rule.bestMax, rule.tempMin, rule.tempMax)
         var tempPoints = 8
         if let water {
             if water >= rule.bestMin && water <= rule.bestMax {
                 tempPoints = 35
-                reasons.append(String(format: "수온 %.0f도는 %@에 잘 맞음", water, rule.name))
+                reasons.append(String(format: "%@ %@: 지금 %.0f도. %@. 지금은 잘 맞는 범위 안", rule.name, waterName, water, tempSpan))
             } else if water >= rule.tempMin && water <= rule.tempMax {
                 tempPoints = 22
-                reasons.append(String(format: "수온 %.0f도로 가능", water))
+                reasons.append(String(format: "%@ %@: 지금 %.0f도. %@. 지금은 가능한 범위 안", rule.name, waterName, water, tempSpan))
             } else {
                 tempPoints = 4
-                reasons.append(String(format: "수온 %.0f도는 %@ 구간 밖", water, rule.name))
+                reasons.append(String(format: "%@ %@: 지금 %.0f도. %@. 지금은 가능한 범위 밖", rule.name, waterName, water, tempSpan))
             }
             if point.measuredTempC == nil && hour.seaC == nil {
                 tempPoints = min(tempPoints, 18)
-                reasons.append("바다 수온이 없어 기온으로만 가늠")
+                reasons.append("\(rule.name) 바다 수온이 없어 기온으로만 가늠")
             }
+        } else {
+            reasons.append("\(rule.name) 수온: 지금 값 없음. \(tempSpan).")
         }
 
         let month = Calendar.current.component(.month, from: hour.time)
@@ -229,33 +252,45 @@ enum FishingAnalyst {
 
         var tidePoints = 8
         if pack.usedSea && rule.water == .sea {
+            let liked = tidePreference(rule)
             switch hour.tide {
             case .flood where rule.flood:
                 tidePoints = 20
-                reasons.append("들물이 이 고기에 맞음")
+                reasons.append("\(rule.name) 물때: 지금 들물. 이 어종은 \(liked). 지금은 맞음")
             case .ebb where rule.ebb:
                 tidePoints = 18
-                reasons.append("날물이 이 고기에 맞음")
-            case .high, .low where rule.slack:
+                reasons.append("\(rule.name) 물때: 지금 날물. 이 어종은 \(liked). 지금은 맞음")
+            case .high where rule.slack, .low where rule.slack:
                 tidePoints = 16
-                reasons.append("조류가 잠깐 죽는 시간이 맞음")
+                reasons.append("\(rule.name) 물때: 지금 \(hour.tide.title). 이 어종은 \(liked). 지금은 맞음")
             case .unknown:
                 tidePoints = 8
+                reasons.append("\(rule.name) 물때: 지금 값 없음. 이 어종은 \(liked)")
             default:
                 tidePoints = 6
+                reasons.append("\(rule.name) 물때: 지금 \(hour.tide.title). 이 어종은 \(liked). 지금은 이 어종의 물때와 다름")
             }
         }
 
         let timePoints = timeScore(rule: rule, hour: hour, pack: pack, reasons: &reasons)
         var sky = 15
         if let wind = hour.windMs {
-            if wind > rule.maxWind { sky -= 12; reasons.append("이 고기 기준으로 바람이 셈") }
-            else if wind >= 8 { sky -= 7; reasons.append("바람이 있어 채비를 무겁게") }
-            else if wind < 5 { reasons.append("바람은 부담 없는 수준") }
+            if wind > rule.maxWind { sky -= 12 }
+            else if wind >= 8 { sky -= 7 }
+            let windJudge = wind > rule.maxWind ? "기준보다 셈" : "기준 안"
+            reasons.append(String(format: "%@ 바람: 지금 %.0fm/s. 이 어종 기준은 %.0fm/s 이하. 지금은 %@", rule.name, wind, rule.maxWind, windJudge))
+        } else {
+            reasons.append(String(format: "%@ 바람: 지금 값 없음. 이 어종 기준은 %.0fm/s 이하", rule.name, rule.maxWind))
         }
-        if rule.water == .sea, let wave = hour.waveM {
-            if wave > rule.maxWave { sky -= 10; reasons.append("파도가 자리보다 큼") }
-            else if wave >= 1.0 { sky -= 4 }
+        if rule.water == .sea {
+            if let wave = hour.waveM {
+                if wave > rule.maxWave { sky -= 10 }
+                else if wave >= 1.0 { sky -= 4 }
+                let waveJudge = wave > rule.maxWave ? "기준보다 큼" : "기준 안"
+                reasons.append(String(format: "%@ 파도: 지금 %.1fm. 이 어종 기준은 %.1fm 이하. 지금은 %@", rule.name, wave, rule.maxWave, waveJudge))
+            } else if pack.usedSea {
+                reasons.append(String(format: "%@ 파도: 지금 값 없음. 이 어종 기준은 %.1fm 이하", rule.name, rule.maxWave))
+            }
         }
         if (hour.rainMm ?? 0) >= 2 { sky -= 4; reasons.append("비가 오는 시간") }
         sky = max(0, sky)
@@ -562,6 +597,78 @@ enum FishingAnalyst {
         return lines
     }
 
+    /// 이미 다루는 어종만 조건표의 범위와 지금 값을 같이 적습니다. 표에 없는 숫자는 만들지 않습니다.
+    static func conditionLines(names: [String], hour: HourCondition?, sea: Bool) -> [String] {
+        var lines: [String] = []
+        for name in names {
+            guard let rule = catalog.first(where: { $0.name == name }) else {
+                lines.append("\(name): 이 앱의 조건표에 범위가 없어 수치를 만들지 않습니다.")
+                continue
+            }
+            lines.append(contentsOf: comparisonLines(rule: rule, hour: hour, sea: sea))
+        }
+        return lines
+    }
+
+    private static func tidePreference(_ rule: SpeciesRule) -> String {
+        var parts: [String] = []
+        if rule.flood { parts.append("들물") }
+        if rule.ebb { parts.append("날물") }
+        if rule.slack { parts.append("만조·간조") }
+        if parts.isEmpty { return "조건표에 물때 선호가 없음" }
+        return parts.joined(separator: "·") + "이 맞음"
+    }
+
+    /// 조건표에 이미 있는 범위와, 그 시각에 받은 값만 적습니다.
+    private static func comparisonLines(rule: SpeciesRule, hour: HourCondition?, sea: Bool) -> [String] {
+        let tempSpan = String(format: "잘 맞는 범위 %.0f~%.0f도, 가능한 범위 %.0f~%.0f도", rule.bestMin, rule.bestMax, rule.tempMin, rule.tempMax)
+        var lines: [String] = []
+        let water = hour.flatMap { $0.seaC ?? $0.airC }
+        let waterName = hour?.seaC != nil ? "수온" : "기온"
+        if let water {
+            let judge: String
+            if water >= rule.bestMin && water <= rule.bestMax {
+                judge = "잘 맞는 범위 안"
+            } else if water >= rule.tempMin && water <= rule.tempMax {
+                judge = "가능한 범위 안"
+            } else {
+                judge = "가능한 범위 밖"
+            }
+            lines.append(String(format: "%@ %@: 지금 %.0f도. %@. 지금은 %@", rule.name, waterName, water, tempSpan, judge))
+        } else {
+            lines.append("\(rule.name) 수온: 지금 값 없음. \(tempSpan).")
+        }
+        if let wind = hour?.windMs {
+            let judge = wind > rule.maxWind ? "기준보다 셈" : "기준 안"
+            lines.append(String(format: "%@ 바람: 지금 %.0fm/s. 이 어종 기준은 %.0fm/s 이하. 지금은 %@", rule.name, wind, rule.maxWind, judge))
+        } else {
+            lines.append(String(format: "%@ 바람: 지금 값 없음. 이 어종 기준은 %.0fm/s 이하", rule.name, rule.maxWind))
+        }
+        if rule.water == .sea {
+            if let wave = hour?.waveM {
+                let judge = wave > rule.maxWave ? "기준보다 큼" : "기준 안"
+                lines.append(String(format: "%@ 파도: 지금 %.1fm. 이 어종 기준은 %.1fm 이하. 지금은 %@", rule.name, wave, rule.maxWave, judge))
+            } else if sea {
+                lines.append(String(format: "%@ 파도: 지금 값 없음. 이 어종 기준은 %.1fm 이하", rule.name, rule.maxWave))
+            }
+            let liked = tidePreference(rule)
+            if let tide = hour?.tide, tide != .unknown {
+                let fits: Bool
+                switch tide {
+                case .flood: fits = rule.flood
+                case .ebb: fits = rule.ebb
+                case .high, .low: fits = rule.slack
+                case .unknown: fits = false
+                }
+                let judge = fits ? "맞음" : "이 어종의 물때와 다름"
+                lines.append("\(rule.name) 물때: 지금 \(tide.title). 이 어종은 \(liked). 지금은 \(judge)")
+            } else {
+                lines.append("\(rule.name) 물때: 지금 값 없음. 이 어종은 \(liked)")
+            }
+        }
+        return lines
+    }
+
     /// 고른 시간 안의 한 시간마다, 조건표에서 가장 잘 맞는 생물을 고릅니다.
     /// 바람·파도·천둥으로 빠지는 시간은 dangerous 로 표시하고 점수는 0입니다.
     static func hourJudgements(
@@ -577,6 +684,10 @@ enum FishingAnalyst {
         if let speciesAllow {
             let allow = Set(speciesAllow)
             rules = rules.filter { allow.contains($0.name) }
+        } else {
+            let recorded = TackleBook.recordedNames(point: point)
+            let matched = rules.filter { recorded.contains($0.name) }
+            if !matched.isEmpty { rules = matched }
         }
         guard !rules.isEmpty else { return [] }
         let stained = recentRain(conditions, now: from) >= 4

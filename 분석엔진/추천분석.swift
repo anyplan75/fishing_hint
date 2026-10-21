@@ -382,8 +382,30 @@ enum RecommendEngine {
         if item.point.source != "스킨스쿠버", (kind == .shore || kind == .skin) {
             risks.append(contentsOf: gleanRisks(night: night == true, skin: kind == .skin))
         }
+        let recordedNames = TackleBook.recordedNames(point: item.point)
+        let subjectNames: [String]
+        if kind == .plan || kind == .now {
+            subjectNames = recordedNames
+        } else if best.species != "스킨스쿠버" {
+            subjectNames = [best.species]
+        } else {
+            subjectNames = []
+        }
+        let conditionLines = FishingAnalyst.conditionLines(names: subjectNames, hour: hour, sea: item.pack.usedSea)
+        if (kind == .plan || kind == .now) && recordedNames.isEmpty {
+            why = why.filter { line in
+                !TackleBook.speciesOrder.contains { line.contains($0) }
+            }
+        }
         let reasonCore = best.reasons.prefix(2).joined(separator: ", ")
-        let reason = reasonCore.isEmpty ? "이 시각의 물때, 바람, 수온을 보고 골랐습니다." : reasonCore
+        let reason: String
+        if (kind == .plan || kind == .now) && recordedNames.isEmpty {
+            reason = "기록된 어종이 없어 어종 조건은 붙이지 않았습니다."
+        } else if !conditionLines.isEmpty {
+            reason = "화면에 나온 어종마다 조건표의 범위와 지금 값을 적었습니다."
+        } else {
+            reason = reasonCore.isEmpty ? "이 시각의 물때, 바람, 수온을 보고 골랐습니다." : reasonCore
+        }
         let cost = TravelEstimate.won(distanceKm: item.distanceKm)
         let pickId = "\(kind.rawValue)|\(item.point.id)|\(speciesLabel)|\(Int(best.time.timeIntervalSince1970))"
         let script = factScript(
@@ -417,7 +439,8 @@ enum RecommendEngine {
             publicWarnings: publicNote.warnings,
             factScript: script,
             aiReason: nil,
-            indexLine: indexLine
+            indexLine: indexLine,
+            conditionLines: conditionLines
         )
     }
 
