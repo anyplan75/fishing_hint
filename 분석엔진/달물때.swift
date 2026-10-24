@@ -62,7 +62,7 @@ enum MoonClock {
     /// 달의 황경과 항성시를 써서 그날 남중(하늘 한가운데) 시각을 구합니다.
     private static func solunar(on date: Date, longitude: Double) -> (majors: [DateInterval], minors: [DateInterval]) {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
         let start = calendar.startOfDay(for: date)
         let jd = julianDay(start)
         let n = jd - 2_451_545.0

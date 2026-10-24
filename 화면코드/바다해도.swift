@@ -1,0 +1,356 @@
+import SwiftUI
+import WebKit
+
+// 바다해도 탭입니다. 맵박스와 따로, 국립해양조사원이 공개한 오픈레이어스 방식으로 해어름을 봅니다.
+
+private enum ChartPlaceKind: String, CaseIterable, Identifiable {
+    case here = "현재 위치"
+    case picked = "고른 자리"
+
+    var id: String { rawValue }
+}
+
+private struct ChartPlace {
+    var title: String
+    var latitude: Double
+    var longitude: Double
+}
+
+struct ChartScreen: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var kind: ChartPlaceKind = .here
+    @State private var facts: [ChartFact] = []
+    @State private var mapScript: String?
+    @State private var rejection: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("바다해도")
+                .font(.largeTitle.weight(.bold))
+            Text("지금 자리의 바다 지도입니다. 항해용으로 쓰지 마세요.")
+                .font(.subheadline)
+                .foregroundStyle(FieldColor.muted)
+            HStack(spacing: 8) {
+                ForEach(ChartPlaceKind.allCases) { item in
+                    Button(item.rawValue) { kind = item }
+                        .buttonStyle(FieldButton(
+                            fill: kind == item ? FieldColor.good : FieldColor.card2,
+                            ink: kind == item ? FieldColor.ink : FieldColor.paper
+                        ))
+                }
+            }
+            if store.haereumKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                missingKey
+            } else if mapScript == nil, let rejection {
+                Text(rejection)
+                    .font(.caption)
+                    .foregroundStyle(FieldColor.muted)
+                    .lineLimit(2)
+            } else if let place = chosenPlace() {
+                if let mapScript {
+                    HaereumMapView(
+                        script: mapScript,
+                        latitude: place.latitude,
+                        longitude: place.longitude
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minHeight: 320)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                } else if !facts.isEmpty {
+                    Text("배경 지도를 불러오지 못했습니다.")
+                        .font(.subheadline)
+                        .foregroundStyle(FieldColor.muted)
+                }
+                if let rejection {
+                    Text(rejection)
+                        .font(.caption)
+                        .foregroundStyle(FieldColor.muted)
+                        .lineLimit(2)
+                }
+                if !facts.isEmpty {
+                    factList
+                }
+            } else {
+                missingPlace
+            }
+        }
+        .padding(16)
+        .background(FieldColor.ink)
+        .foregroundStyle(FieldColor.paper)
+        .task(id: reloadKey) {
+            await reloadFacts()
+        }
+    }
+
+    private var missingKey: some View {
+        FieldCard {
+            Text("해도 없음. 비밀 파일에 KHOA_HAEREUM_KEY 가 없습니다. 해양공간정보 키로는 해도를 부르지 않습니다.")
+                .font(.subheadline)
+        }
+    }
+
+    private var missingPlace: some View {
+        FieldCard {
+            Text(kind == .here
+                 ? "현재 위치가 없습니다. 위치 권한을 허용해 주세요."
+                 : "고른 자리가 없습니다. 지도에서 오른쪽을 클릭하거나 길게 눌러 저장하거나, 저장한 지역을 고르세요.")
+                .font(.subheadline)
+        }
+    }
+
+    private var factList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                if facts.isEmpty && rejection == nil {
+                    Text("이 지점의 글을 가져오는 중입니다.")
+                        .font(.caption)
+                        .foregroundStyle(FieldColor.muted)
+                }
+                ForEach(facts) { fact in
+                    FieldCard {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(fact.title).font(.headline)
+                            ForEach(Array(fact.lines.enumerated()), id: \.offset) { _, line in
+                                Text(line).font(.subheadline)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: 220)
+    }
+
+    private var reloadKey: String {
+        let key = store.haereumKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let place = chosenPlace()
+        let lat = place.map { String(format: "%.4f", $0.latitude) } ?? "-"
+        let lon = place.map { String(format: "%.4f", $0.longitude) } ?? "-"
+        return "\(kind.rawValue)|\(lat)|\(lon)|\(key.isEmpty)|\(key.hashValue)"
+    }
+
+    private func chosenPlace() -> ChartPlace? {
+        switch kind {
+        case .here:
+            guard let latitude = store.userLat, let longitude = store.userLon else { return nil }
+            return ChartPlace(title: "현재 위치", latitude: latitude, longitude: longitude)
+        case .picked:
+            if let tapped = store.tapped {
+                return ChartPlace(title: tapped.name, latitude: tapped.latitude, longitude: tapped.longitude)
+            }
+            if let id = store.selectedPointId {
+                if let mine = store.myPoints.first(where: { $0.id == id }) {
+                    return ChartPlace(title: mine.name, latitude: mine.latitude, longitude: mine.longitude)
+                }
+                if let brief = store.briefings[id] {
+                    return ChartPlace(title: brief.point.name, latitude: brief.point.latitude, longitude: brief.point.longitude)
+                }
+            }
+            if !store.useMyLocation, let region = store.region {
+                return ChartPlace(title: region.name, latitude: region.latitude, longitude: region.longitude)
+            }
+            return nil
+        }
+    }
+
+    private func reloadFacts() async {
+        let key = store.haereumKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, let place = chosenPlace() else {
+            facts = []
+            mapScript = nil
+            rejection = nil
+            return
+        }
+        facts = []
+        mapScript = nil
+        rejection = nil
+        do {
+            let page = try await HaereumClient.load(latitude: place.latitude, longitude: place.longitude, apiKey: key)
+            rejection = page.rejection
+            mapScript = page.script
+            facts = page.facts
+        } catch is CancellationError {
+            return
+        } catch {
+            rejection = "해도를 불러오지 못했습니다."
+            mapScript = nil
+            facts = []
+        }
+    }
+}
+
+private struct HaereumMapView: View {
+    var script: String
+    var latitude: Double
+    var longitude: Double
+
+    var body: some View {
+        HaereumWebView(script: script, latitude: latitude, longitude: longitude)
+    }
+}
+
+#if os(iOS)
+private struct HaereumWebView: UIViewRepresentable {
+    var script: String
+    var latitude: Double
+    var longitude: Double
+
+    func makeCoordinator() -> HaereumCoordinator { HaereumCoordinator() }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let webView = MapGestureWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        webView.releasePageGestures()
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        (webView as? MapGestureWebView)?.releasePageGestures()
+        context.coordinator.load(webView, script: script, latitude: latitude, longitude: longitude)
+    }
+}
+#else
+private struct HaereumWebView: NSViewRepresentable {
+    var script: String
+    var latitude: Double
+    var longitude: Double
+
+    func makeCoordinator() -> HaereumCoordinator { HaereumCoordinator() }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let webView = WKWebView(frame: .zero)
+        webView.setValue(false, forKey: "drawsBackground")
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.load(webView, script: script, latitude: latitude, longitude: longitude)
+    }
+}
+#endif
+
+private final class HaereumCoordinator {
+    private var signature = ""
+
+    func load(_ webView: WKWebView, script: String, latitude: Double, longitude: Double) {
+        let next = String(format: "%.4f,%.4f,%d", latitude, longitude, script.hashValue)
+        if next != signature {
+            signature = next
+            let html = HaereumPage.html(script: script, latitude: latitude, longitude: longitude)
+            webView.loadHTMLString(html, baseURL: URL(string: "https://www.khoa.go.kr"))
+        }
+        if webView.bounds.width > 1, webView.bounds.height > 1 {
+            webView.evaluateJavaScript("if (window.chartMap) { window.chartMap.updateSize(); }", completionHandler: nil)
+        }
+    }
+}
+
+private enum HaereumPage {
+    static func html(script: String, latitude: Double, longitude: Double) -> String {
+        let source = script.replacingOccurrences(of: "</", with: "<\\/")
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          html, body, #map { margin:0; height:100%; background:#071014; touch-action:none; }
+          #note { position:absolute; left:8px; right:8px; bottom:8px; color:#e8efe6; font:13px -apple-system, sans-serif; }
+        </style>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/openlayers/2.13.1/OpenLayers.js"></script>
+        <script src="https://www.khoa.go.kr/oceanmap/js/proj4js-1.1.0/lib/proj4js.js"></script>
+        <script src="https://www.khoa.go.kr/oceanmap/js/proj4js-1.1.0/lib/defs/EPSG5179.js"></script>
+        <script src="https://www.khoa.go.kr/oceanmap/js/proj4js-1.1.0/lib/projCode/tmerc.js"></script>
+        <script src="https://www.khoa.go.kr/oceanmap/js/gis/OtmsApi.js"></script>
+        <script>
+        \(source)
+        </script>
+        </head>
+        <body>
+        <div id="map"></div>
+        <div id="note"></div>
+        <script>
+        function startChart() {
+          var note = document.getElementById("note");
+          if (typeof OpenLayers === "undefined" || typeof OtmsLayer === "undefined") {
+            note.textContent = "해어름 지도를 불러오지 못했습니다.";
+            return;
+          }
+          if (typeof Proj4js === "undefined" || !Proj4js.defs["EPSG:5179"]) {
+            note.textContent = "위치 변환 도구를 불러오지 못했습니다.";
+            return;
+          }
+          OpenLayers.IMAGE_RELOAD_ATTEMPTS = 3;
+          OpenLayers.Util.onImageLoadErrorColor = "transparent";
+          var baseRes = 1954.597389;
+          var resolutions = [];
+          var serverResolutions = [];
+          for (var level = 0; level < 8; level++) {
+            var value = baseRes / Math.pow(2, level);
+            resolutions.push(value);
+            if (level < 5) serverResolutions.push(value);
+          }
+          OtmsLayer.serverResolutions = serverResolutions;
+          OtmsLayer.getURL = function(bounds) {
+            var res = this.getServerResolution();
+            var zoom = this.getServerZoom();
+            if (!(zoom >= 0)) zoom = Math.max(0, Math.min(4, this.map.getZoom()));
+            var x = Math.round((bounds.left - apiMapBounds_tile.left) / (res * this.tileSize.w));
+            var y = Math.round((bounds.bottom - apiMapBounds_tile.bottom) / (res * this.tileSize.h));
+            var z = zoom + 6;
+            if (z > 10) z = 10;
+            if (z < 6) z = 6;
+            var label = (z < 10 ? "0" : "") + z;
+            var join = this.url.indexOf("?") < 0 ? "?" : "&";
+            return this.url + join + "z=L" + label + "&y=" + y + "&x=" + x;
+          };
+          var map = new OpenLayers.Map("map", {
+            projection: new OpenLayers.Projection("EPSG:5179"),
+            displayProjection: new OpenLayers.Projection("EPSG:4326"),
+            maxExtent: new OpenLayers.Bounds(-200000.0, -3015.4524155292, 3803015.45241553, 4000000.0),
+            restrictedExtent: new OpenLayers.Bounds(37953.1466, 1126946.7253, 2152527.8074, 2873292.7040),
+            allOverlays: true,
+            resolutions: resolutions,
+            maxResolution: resolutions[0],
+            numZoomLevels: resolutions.length,
+            layers: [OtmsLayer],
+            controls: []
+          });
+          var center = new OpenLayers.LonLat(\(longitude), \(latitude)).transform(
+            new OpenLayers.Projection("EPSG:4326"),
+            new OpenLayers.Projection("EPSG:5179")
+          );
+          window.chartMap = map;
+          var placed = false;
+          function placeChart() {
+            var box = document.getElementById("map");
+            if (window.innerWidth > 20 && window.innerHeight > 20) {
+              box.style.width = window.innerWidth + "px";
+              box.style.height = window.innerHeight + "px";
+            }
+            map.updateSize();
+            if (!placed && window.innerHeight > 80) {
+              map.setCenter(center, 4);
+              placed = true;
+            }
+          }
+          placeChart();
+          window.addEventListener("resize", placeChart);
+          var tries = 0;
+          var timer = setInterval(function() {
+            tries += 1;
+            placeChart();
+            if (placed || tries > 12) clearInterval(timer);
+          }, 300);
+          map.addControl(new OpenLayers.Control.Navigation({
+            dragPanOptions: { enableKinetic: true },
+            pinchZoomOptions: { autoActivate: true }
+          }));
+        }
+        window.onload = startChart;
+        </script>
+        </body>
+        </html>
+        """
+    }
+}

@@ -11,6 +11,109 @@ enum TackleBook {
         "붕어", "배스", "쏘가리",
     ]
 
+    /// 그 자리에 적힌 어종이 없을 때 화면에 그대로 보여 주는 문장입니다.
+    static let missingSpecies = "기록된 어종 없음"
+
+    /// 같은 고기를 가리키는 다른 적기입니다. 글에 이 말이 있을 때만 앞의 이름으로 보여 줍니다.
+    private static let aliases: [(name: String, written: String)] = [
+        ("벵에돔", "뱅에돔"),
+    ]
+
+    /// 공개 글, 유튜브, 구글 인용, 공식 자료, 그 자리 메모에 실제로 적힌 어종만 고릅니다.
+    /// 날짜나 전국 공통 표로 이름을 만들지 않습니다.
+    static func recordedNames(point: FishingPoint) -> [String] {
+        var found = names(in: point.targetMemo + "\n" + point.memo)
+        if point.source == "낚시터표준" {
+            for token in speciesTokens(in: point.targetMemo) where !found.contains(token) {
+                found.append(token)
+            }
+        }
+        for row in OfficialNotes.rows[point.id] ?? [] {
+            for token in speciesTokens(in: row.species) where !found.contains(token) {
+                found.append(token)
+            }
+        }
+        let known = speciesOrder.filter { found.contains($0) }
+        let extra = found.filter { !speciesOrder.contains($0) }
+        return known + extra
+    }
+
+    static func recordedLabel(point: FishingPoint) -> String {
+        let names = recordedNames(point: point)
+        return names.isEmpty ? missingSpecies : names.joined(separator: ", ")
+    }
+
+    /// 한 글 묶음 안에서 어종 이름만 꺼냅니다. 글에 없는 이름은 넣지 않습니다.
+    static func names(in text: String) -> [String] {
+        var found: [String] = []
+        for name in speciesOrder where containsName(name, in: text) {
+            found.append(name)
+        }
+        for alias in aliases where containsName(alias.written, in: text) && !found.contains(alias.name) {
+            found.append(alias.name)
+        }
+        return speciesOrder.filter { found.contains($0) }
+    }
+
+    static func unrecordedPlan() -> TacklePlan {
+        TacklePlan(
+            id: "기록없음",
+            species: missingSpecies,
+            method: "",
+            summary: "이 자리의 공개 글, 유튜브, 구글 인용, 공식 자료에 적힌 어종이 없습니다. 없는 어종은 만들지 않습니다.",
+            why: "",
+            rod: "",
+            reel: "",
+            mainLine: "",
+            leader: "",
+            terminal: "",
+            bait: "",
+            chum: "",
+            rig: "",
+            depth: "",
+            bite: "",
+            steps: [],
+            bag: [],
+            avoid: [],
+            adjustments: []
+        )
+    }
+
+    /// 쉼표나 슬래시로 나뉜 공식 어종 칸을 이름만 남깁니다.
+    private static func speciesTokens(in text: String) -> [String] {
+        let separators = CharacterSet(charactersIn: ",/·|，、")
+        return text.components(separatedBy: separators).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { token in
+            guard token.count >= 2, token != "-", token != "없음", token != "기타", token != "미정" else { return false }
+            let blocked = ["갯바위", "방파제", "낚시", "유료", "선상", "바다", "민물", "지수"]
+            if blocked.contains(token) { return false }
+            if speciesOrder.contains(where: { token.contains($0) }) { return true }
+            if aliases.contains(where: { token.contains($0.written) }) { return true }
+            let hangul = token.unicodeScalars.allSatisfy { scalar in
+                (0xAC00...0xD7A3).contains(scalar.value)
+            }
+            return hangul && token.count <= 8
+        }.map { token in
+            if let known = speciesOrder.first(where: { token.contains($0) }) { return known }
+            if let alias = aliases.first(where: { token.contains($0.written) }) { return alias.name }
+            return token
+        }
+    }
+
+    private static func containsName(_ name: String, in text: String) -> Bool {
+        var rest = Substring(text)
+        while let range = rest.range(of: name) {
+            let next = rest[range.upperBound...].first
+            if name == "농어", next == "촌" {
+                rest = rest[range.upperBound...]
+                continue
+            }
+            return true
+        }
+        return false
+    }
+
     static func plan(for species: String, context: FieldContext) -> TacklePlan {
         switch species {
         case "감성돔": return gamsung(context)

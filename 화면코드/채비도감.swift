@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 // 고기별 기본 채비입니다. 바람과 조차가 반영된 오늘 채비는 포인트 화면에 나옵니다.
 
@@ -66,10 +65,13 @@ struct MyPointsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("내 포인트")
                     .font(.largeTitle.weight(.bold))
-                Text("내가 찍어서 저장한 자리입니다. 반경 밖이어도 분석 목록에 같이 들어갑니다.")
+                Text("내가 저장한 자리입니다. 자리마다 받은 예보로 낚시 시간과 주간·야간 해루질 시간을 보여 줍니다. 알림은 해루질 시간에만 옵니다.")
                     .foregroundStyle(FieldColor.muted)
+                Text(store.savedTimesNote)
+                    .font(.subheadline)
+                    .foregroundStyle(FieldColor.wait)
                 if store.myPoints.isEmpty {
-                    Text("아직 없습니다. 지도에서 자리를 연 뒤 '내 포인트로 저장'을 누르세요.")
+                    Text("아직 없습니다. 지도에서 오른쪽을 클릭하거나 길게 누른 뒤 이름을 적고 저장하세요. 추천에서는 이름 정하고 저장을 누르세요. 이름을 비우면 여기에 나오지 않습니다.")
                         .padding(.top, 12)
                 }
                 ForEach(store.myPoints) { point in
@@ -88,6 +90,21 @@ struct MyPointsView: View {
                                     .font(.caption)
                                     .foregroundStyle(FieldColor.muted)
                             }
+                            if let times = store.savedTimes[point.id] {
+                                Text(times.successText)
+                                    .font(.headline.weight(.bold))
+                                    .foregroundStyle(FieldColor.paper)
+                                Text(times.indexLine)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(FieldColor.wait)
+                                timeBlock("낚시하기 좋은 때", lines: times.fishingLines, color: FieldColor.good)
+                                timeBlock("주간 해루질", lines: times.dayLines, color: FieldColor.wait)
+                                timeBlock("야간 해루질", lines: times.nightLines, color: FieldColor.glean)
+                            } else {
+                                Text("이 자리의 시간을 계산하는 중입니다.")
+                                    .font(.caption)
+                                    .foregroundStyle(FieldColor.muted)
+                            }
                             HStack {
                                 Button("분석") { store.select(point.id) }
                                     .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
@@ -103,47 +120,47 @@ struct MyPointsView: View {
         .background(FieldColor.ink)
         .foregroundStyle(FieldColor.paper)
     }
+
+    private func timeBlock(_ title: String, lines: [String], color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(color)
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.subheadline)
+            }
+        }
+        .padding(.top, 4)
+    }
 }
 
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var importing = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("설정")
                     .font(.largeTitle.weight(.bold))
-                Text("암호는 이 화면에서만 넣고, 기기 열쇠고에 저장됩니다. 프로그램 파일에는 적지 않습니다.")
+                Text("암호는 이 화면에 넣지 않습니다. 연결만 여기서 봅니다.")
                     .foregroundStyle(FieldColor.muted)
 
                 FieldCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("맵박스 공개 토큰")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("연결")
                             .font(.headline)
-                        SecureField("pk. 로 시작", text: $store.mapboxToken)
-                            .textFieldStyle(.roundedBorder)
-                        Text("맵박스 계정에서 토큰을 만든 뒤 붙여 넣습니다. 지도 스타일을 읽을 수 있어야 합니다.")
-                            .font(.caption)
-                            .foregroundStyle(FieldColor.muted)
+                        Text(store.mapLink.connected ? "지도 연결됨" : store.mapLink.reason)
+                        Text(store.aiLink.connected ? "인공지능 연결됨" : store.aiLink.reason)
+                        Text(store.tideLink.connected ? "조석 연결됨" : store.tideLink.reason)
+                        Text(store.youtubeLink.connected ? "유튜브 연결됨" : store.youtubeLink.reason)
+                        Text(store.fishingIndexLink.connected ? "바다낚시지수 연결됨" : store.fishingIndexLink.reason)
+                        Text(store.fishingSpotLink.connected ? "전국낚시터 연결됨" : store.fishingSpotLink.reason)
+                        Text(store.scubaLink.connected ? "스킨스쿠버지수 연결됨" : store.scubaLink.reason)
+                        Text(store.naverLink.connected ? "네이버 검색 연결됨" : store.naverLink.reason)
+                        Text(store.googleLink.connected ? "구글 검색 연결됨" : store.googleLink.reason)
                     }
-                }
-                FieldCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("인공지능 암호")
-                            .font(.headline)
-                        SecureField("제미나이 암호", text: $store.geminiKey)
-                            .textFieldStyle(.roundedBorder)
-                        Text("구글 AI 스튜디오에서 발급한 암호입니다. 없어도 수온·물때·채비 계산은 그대로 나옵니다. 있으면 그 계산을 오늘 순서로 다듬습니다.")
-                            .font(.caption)
-                            .foregroundStyle(FieldColor.muted)
-                    }
-                }
-                HStack {
-                    Button("암호 저장") { store.saveSecrets() }
-                        .buttonStyle(FieldButton(fill: FieldColor.good, ink: FieldColor.ink))
-                    Button("비밀 파일 불러오기") { importing = true }
-                        .buttonStyle(FieldButton(fill: FieldColor.card2))
+                    .font(.subheadline)
                 }
 
                 Text("노리는 고기")
@@ -171,7 +188,7 @@ struct SettingsView: View {
                     }
                     .font(.subheadline)
                 }
-                Text("바로낚시 0.1.0")
+                Text("바로낚시 1.0")
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
                 Text(store.statusText)
@@ -182,10 +199,5 @@ struct SettingsView: View {
         }
         .background(FieldColor.ink)
         .foregroundStyle(FieldColor.paper)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text]) { result in
-            if case .success(let url) = result {
-                store.importSecrets(from: url)
-            }
-        }
     }
 }
