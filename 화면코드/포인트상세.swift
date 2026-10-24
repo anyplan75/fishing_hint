@@ -312,7 +312,9 @@ struct PointEditSheet: View {
                 if let temp = point.measuredTempC { tempText = String(format: "%.1f", temp) }
             }
         }
+        #if os(iOS)
         .navigationViewStyle(StackNavigationViewStyle())
+        #endif
     }
 }
 
@@ -368,7 +370,9 @@ struct NameSaveSheet: View {
             }
             .onAppear { focused = true }
         }
+        #if os(iOS)
         .navigationViewStyle(StackNavigationViewStyle())
+        #endif
     }
 
     private func storeName() {

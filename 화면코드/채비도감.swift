@@ -188,7 +188,7 @@ struct SettingsView: View {
                     }
                     .font(.subheadline)
                 }
-                Text("바로낚시 0.1.0")
+                Text("바로낚시 1.0")
                     .font(.caption)
                     .foregroundStyle(FieldColor.muted)
                 Text(store.statusText)
