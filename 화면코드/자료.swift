@@ -189,6 +189,71 @@ struct PointBriefing: Identifiable {
     var script: String
     var aiScript: String?
     var conditions: ConditionPack
+    /// 화면에 나온 어종마다, 조건표에 있는 범위와 지금 값입니다. 없는 수치는 넣지 않습니다.
+    var conditionLines: [String]
+}
+
+enum RecommendKind: String {
+    case plan
+    case now
+    case shore
+    case skin
+
+    var title: String {
+        switch self {
+        case .plan: return "낚시 계획"
+        case .now: return "바로가자"
+        case .shore: return "갯가 해루질"
+        case .skin: return "수중 스킨해루질"
+        }
+    }
+}
+
+enum RecommendScope {
+    case here
+    case saved
+}
+
+struct SpotFacts {
+    var weather: String
+    var wind: String
+    var pressure: String
+    var rain: String
+    var water: String
+    var wave: String
+    var seaLevel: String
+    var tide: String
+    var moon: String
+    var place: String
+}
+
+struct SpotPick: Identifiable {
+    var id: String
+    var kind: RecommendKind
+    var point: FishingPoint
+    var when: Date
+    var successRate: Int
+    var distanceKm: Double?
+    var costWon: Int?
+    var species: String
+    var reason: String
+    var whyLines: [String]
+    var facts: SpotFacts
+    var risks: [String]
+    var publicSummary: String
+    var publicWarnings: [String]
+    var factScript: String
+    var aiReason: String?
+    /// 그 자리에 붙은 공식 바다낚시지수입니다. 가까운 지수가 없으면 "지수 없음"입니다.
+    var indexLine: String
+    /// 이 카드가 다루는 어종의 조건표 범위와 지금 값입니다.
+    var conditionLines: [String]
+}
+
+/// 지도나 추천에서 자리를 누른 뒤, 이름을 물어 저장할 때 쓰는 묶음입니다.
+struct SavePrompt: Identifiable {
+    let id = UUID()
+    var point: FishingPoint
 }
 
 struct DiskBox: Codable {

@@ -12,6 +12,7 @@ enum FieldColor {
     static let wait = Color(red: 0.56, green: 0.83, blue: 1.0)
     static let bad = Color(red: 1.0, green: 0.42, blue: 0.29)
     static let sea = Color(red: 0.11, green: 0.55, blue: 0.53)
+    static let glean = Color(red: 1.0, green: 0.62, blue: 0.18)
     static let muted = Color(red: 0.62, green: 0.71, blue: 0.74)
 }
 
